@@ -43,7 +43,7 @@ struct TransactionRow: View {
                 Text(transaction.signedAmount, format: .currency(code: "USD"))
                     .font(.subheadline)
                     .fontWeight(.semibold)
-                    .foregroundStyle(transaction.isExpense ? .primary : .green)
+                    .foregroundStyle(transaction.isExpense ? Color.primary : Color.green)
 
                 if transaction.isPending {
                     Text("Pending")
