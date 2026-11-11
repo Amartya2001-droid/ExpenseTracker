@@ -71,3 +71,17 @@ extension Transaction {
         }
     }
 }
+
+extension Transaction {
+    /// Parse the complete input as decimal currency, rejecting grouping and fractional cents.
+    static func parseAmount(_ input: String, locale: Locale = .current) throws -> Double {
+        let separator = locale.decimalSeparator ?? "."
+        let normalized = input.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: separator, with: ".")
+        guard normalized.range(of: #"^[0-9]+(?:\.[0-9]{1,2})?$"#, options: .regularExpression) != nil,
+              let decimal = Decimal(string: normalized, locale: Locale(identifier: "en_US_POSIX")),
+              decimal > 0, decimal <= Decimal(string: "999999999.99")! else {
+            throw TransactionListViewModel.LedgerError.invalidData
+        }
+        return NSDecimalNumber(decimal: decimal).doubleValue
+    }
+}

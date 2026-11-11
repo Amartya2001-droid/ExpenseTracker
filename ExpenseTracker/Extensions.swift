@@ -10,14 +10,21 @@ import SwiftUI
 
 // MARK: - String
 extension String {
-    func dateParsed() -> Date {
+    var validTransactionDate: Date? {
         let formatter = DateFormatter()
-        // The endpoint uses Gregorian US-format dates, independent of device settings.
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.dateFormat = "MM/dd/yyyy"
-        return formatter.date(from: self) ?? Date()
+        formatter.isLenient = false
+        guard let date = formatter.date(from: self), formatter.string(from: date) == self else { return nil }
+        return date
     }
+
+    func dateParsed() -> Date {
+        // Legacy callers remain nonoptional; persisted entries are validated before use.
+        validTransactionDate ?? .distantPast
+    }
+
 }
 
 // MARK: - Date
