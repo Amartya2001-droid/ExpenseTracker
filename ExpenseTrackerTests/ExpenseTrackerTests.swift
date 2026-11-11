@@ -1,36 +1,23 @@
-//
-//  ExpenseTrackerTests.swift
-//  ExpenseTrackerTests
-//
-//  Created by Amartya Karmakar on 2024-06-19.
-//
-
 import XCTest
 @testable import ExpenseTracker
 
 final class ExpenseTrackerTests: XCTestCase {
-
-    override func setUpWithError() throws {
-        // Put setup code here. This method is called before the invocation of each test method in the class.
+    func testRecentTransactionsAreNewestFirstAndLimitedToFive() {
+        let model = TransactionListViewModel(fetchOnInit: false)
+        model.transactions = Transaction.all.sorted { $0.parsedDate < $1.parsedDate }
+        let recent = model.recentTransactions
+        XCTAssertEqual(recent.count, 5)
+        XCTAssertEqual(Set(recent.map(\.id)), Set([1, 2, 3, 4, 5]))
+        XCTAssertTrue(zip(recent, recent.dropFirst()).allSatisfy { $0.parsedDate >= $1.parsedDate })
     }
 
-    override func tearDownWithError() throws {
-        // Put teardown code here. This method is called after the invocation of each test method in the class.
+    func testTotalsExcludeIncomeAndEmptyInputIsSafe() {
+        let model = TransactionListViewModel(fetchOnInit: false)
+        XCTAssertEqual(model.totalExpenses, 0)
+        XCTAssertTrue(model.recentTransactions.isEmpty)
+        XCTAssertTrue(model.groupTransactionsByMonth().isEmpty)
+        XCTAssertTrue(model.accumulateTransactions().isEmpty)
+        model.transactions = Transaction.all.filter { [1, 2, 10].contains($0.id) }
+        XCTAssertEqual(model.totalExpenses, 16.98, accuracy: 0.001)
     }
-
-    func testExample() throws {
-        // This is an example of a functional test case.
-        // Use XCTAssert and related functions to verify your tests produce the correct results.
-        // Any test you write for XCTest can be annotated as throws and async.
-        // Mark your test throws to produce an unexpected failure when your test encounters an uncaught error.
-        // Mark your test async to allow awaiting for asynchronous code to complete. Check the results with assertions afterwards.
-    }
-
-    func testPerformanceExample() throws {
-        // This is an example of a performance test case.
-        self.measure {
-            // Put the code you want to measure the time of here.
-        }
-    }
-
 }

@@ -13,8 +13,8 @@ final class TransactionListViewModel: ObservableObject {
 
     private var cancellables = Set<AnyCancellable>()
 
-    init() {
-        fetchTransactions()
+    init(fetchOnInit: Bool = true) {
+        if fetchOnInit { fetchTransactions() }
     }
 
     func fetchTransactions() {
@@ -82,6 +82,6 @@ final class TransactionListViewModel: ObservableObject {
     }
 
     var recentTransactions: [Transaction] {
-        Array(transactions.prefix(5))
+        Array(transactions.sorted { $0.parsedDate > $1.parsedDate }.prefix(5))
     }
 }
