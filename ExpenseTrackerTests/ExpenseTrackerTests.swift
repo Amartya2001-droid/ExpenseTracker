@@ -2,6 +2,18 @@ import XCTest
 @testable import ExpenseTracker
 
 final class ExpenseTrackerTests: XCTestCase {
+    func testFixedFormatDatesUseGregorianYearsAndMonthDayOrder() {
+        let calendar = Calendar(identifier: .gregorian)
+        for (input, year, month, day) in [("04/12/2026", 2026, 4, 12),
+                                         ("02/29/2024", 2024, 2, 29),
+                                         ("12/31/2025", 2025, 12, 31)] {
+            let components = calendar.dateComponents([.year, .month, .day], from: input.dateParsed())
+            XCTAssertEqual(components.year, year, input)
+            XCTAssertEqual(components.month, month, input)
+            XCTAssertEqual(components.day, day, input)
+        }
+    }
+
     func testRecentTransactionsAreNewestFirstAndLimitedToFive() {
         let model = TransactionListViewModel(fetchOnInit: false)
         model.transactions = Transaction.all.sorted { $0.parsedDate < $1.parsedDate }

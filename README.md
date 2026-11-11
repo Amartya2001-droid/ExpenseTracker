@@ -30,8 +30,14 @@ Baseline: `93288ff` (June 24, 2024). No existing issues or open PRs were found a
 - The existing iOS 17.5 target supports the visible NavigationStack, Charts, previews, and toolbar APIs. Current SDK compilation and deprecation warnings require macOS CI; Linux source inspection cannot establish build success.
 - Initial CI on Xcode 16.4 / iOS 18.5 SDK exposed a compile error in the amount color ternary (`HierarchicalShapeStyle` versus `Color`); both branches now explicitly use `Color`.
 - Recent transactions previously depended on endpoint ordering. They now sort by date before taking five; regression tests use bundled data without a network request.
-- Remaining risks: date parsing depends on locale/calendar and substitutes today's date on invalid input; monthly grouping uses formatted strings; the remote sample endpoint's availability was not verified; network fallback has no visible error/sample-data indication; the full transaction view has no scroll container. These require follow-up validation and small fixes, not new features.
+- Remaining risks: date parsing still substitutes today's date on invalid input; monthly grouping uses formatted strings; the remote sample endpoint's availability was not verified; network fallback has no visible error/sample-data indication; the full transaction view has no scroll container. These require follow-up validation and small fixes, not new features.
 - The checked-in development team and bundle identifiers are historical project configuration. Distribution ownership, signing, and release status need Amartya's confirmation. No licence file is present; no licence is inferred.
+
+## Day 2 audit
+
+- Fixed-format endpoint dates now use `en_US_POSIX` and the Gregorian calendar, so a device's selected calendar cannot reinterpret the year. Regression tests cover month/day order, leap day, and year boundaries.
+- Invalid-date handling remains unresolved: the existing parser substitutes today's date. Changing this safely needs a separate data-validation policy; no synthetic replacement date is introduced here.
+- No third-party packages are configured to update. Layout/scrolling and device-specific behavior remain unverified and unchanged. Linux cannot execute XCTest or Xcode; consult the branch/PR macOS CI result for build and test evidence.
 
 ## Contributing
 
