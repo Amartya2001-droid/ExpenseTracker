@@ -12,6 +12,9 @@ import SwiftUI
 extension String {
     func dateParsed() -> Date {
         let formatter = DateFormatter()
+        // The endpoint uses Gregorian US-format dates, independent of device settings.
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
         formatter.dateFormat = "MM/dd/yyyy"
         return formatter.date(from: self) ?? Date()
     }
