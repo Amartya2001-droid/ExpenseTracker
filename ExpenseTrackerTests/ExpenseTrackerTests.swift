@@ -73,6 +73,7 @@ final class ExpenseTrackerTests: XCTestCase {
 
     func testCurrencyInputRequiresCompletePositiveDecimalAmount() throws {
         XCTAssertEqual(try Transaction.parseAmount("12,50", locale: Locale(identifier: "de_DE")), 12.5)
+        XCTAssertThrowsError(try Transaction.parseAmount("1.00", locale: Locale(identifier: "de_DE")))
         XCTAssertEqual(try Transaction.parseAmount("12.50", locale: Locale(identifier: "en_US")), 12.5)
         for input in ["", "0", "-1", "1.234", "12abc", "NaN", "1,000", "1000000000"] {
             XCTAssertThrowsError(try Transaction.parseAmount(input, locale: Locale(identifier: "en_US")))

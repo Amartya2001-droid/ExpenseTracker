@@ -76,6 +76,10 @@ extension Transaction {
     /// Parse the complete input as decimal currency, rejecting grouping and fractional cents.
     static func parseAmount(_ input: String, locale: Locale = .current) throws -> Double {
         let separator = locale.decimalSeparator ?? "."
+        // A period is grouping punctuation in locales such as de_DE, not a decimal separator.
+        guard separator == "." || !input.contains(".") else {
+            throw TransactionListViewModel.LedgerError.invalidData
+        }
         let normalized = input.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: separator, with: ".")
         guard normalized.range(of: #"^[0-9]+(?:\.[0-9]{1,2})?$"#, options: .regularExpression) != nil,
               let decimal = Decimal(string: normalized, locale: Locale(identifier: "en_US_POSIX")),
