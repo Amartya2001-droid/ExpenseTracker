@@ -36,6 +36,6 @@ Linux cannot compile SwiftUI/UIKit/Combine or execute Xcode/XCTest. CI results e
 
 - [Day 1 PR #2](https://github.com/Amartya2001-droid/ExpenseTracker/pull/2): CI/shared scheme, latest-five sorting, tests, and a colour type compile fix; macOS CI passed.
 - [Day 2 PR #3](https://github.com/Amartya2001-droid/ExpenseTracker/pull/3): Gregorian/POSIX date parsing; branch macOS CI passed before opening.
-- Core tracker work follows Amartya's expanded product scope after the original Day 2 report. It is stacked on those open PRs; merge dependencies first and retarget subsequent PRs to main.
+- Core tracker work follows Amartya's expanded product scope. The Day 3 branch starts from main after merged PR #4 and targets main directly; it is not stacked on an unmerged branch.
 
 Follow [AGENTS.md](AGENTS.md): branch and PR for changes, passing tests before a PR, no secrets, honest status, and reports in the [daily log](https://github.com/Amartya2001-droid/ExpenseTracker/issues/1). No licence is inferred; none is supplied.
