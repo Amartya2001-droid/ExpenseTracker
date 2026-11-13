@@ -1,18 +1,22 @@
 # ExpenseTracker
 
-SwiftUI iOS demo for viewing sample expenses, a spending chart, and transaction lists.
+A native SwiftUI iOS expense tracker with an offline ledger, built with Swift, Foundation, Combine, and Apple Charts. No third-party packages or API keys are required.
 
-## Current status
+## What works in source
 
-- Source implements an overview, total expenses, five recent transactions, and a list grouped by month.
-- It requests sample JSON from `https://designcode.io/data/transactions.json` and silently falls back to bundled mock data on request or decoding failure. This is not a personal finance backend or bank connection.
-- Bundled transactions have fixed February–April 2026 dates. The chart shows only the current month, so fallback data can leave it empty. The total includes expenses across all months.
-- Live status: **not live yet — blocked by an unverified release build, Apple signing/distribution setup, and no supplied App Store or TestFlight URL.** No live release was verified during the audit.
-- Linux cannot build SwiftUI, Combine, UIKit, or iOS simulator tests. Build and test verification must come from the macOS GitHub Actions workflow or Xcode on a Mac. A workflow file alone is not evidence of a successful build.
+- Add expenses and income with a merchant/description, category, account, date, and USD amount.
+- Edit transactions by tapping a row in **See All**; swipe to edit or delete.
+- Atomic JSON persistence in the app's Documents directory with iOS complete file protection. Save failures leave the in-memory ledger unchanged; unreadable saved files are preserved and block writes.
+- Search merchant, category, or account; filter expenses; scroll through month groups sorted newest first.
+- Current-month spending chart and total, all-time expenses, and net income minus expenses.
+- Empty personal ledger on first launch. **Try Sample Data** explicitly imports bundled entries only into an empty ledger; sample dates are fixed in February–April 2026, so the current-month chart may be empty.
+- Complete currency input validation (positive amounts, at most two fractional digits, local decimal separator, no grouping, maximum $999,999,999.99). Saved dates are strict Gregorian `MM/dd/yyyy`; malformed saved ledgers are not silently replaced with sample data.
 
-## Build and test
+The previous automatic remote sample fetch is removed: your personal ledger cannot be overwritten by an endpoint response. There is no bank connection, account authentication, cloud sync, multi-currency conversion, or receipt OCR. Money retains the original Double model for compatibility; input is parsed through Decimal and constrained to cents, but totals are not an accounting-grade decimal engine. Deleting the app can delete its local data; no in-app backup/export flow exists yet.
 
-The project was created with Xcode 15.4, uses Swift 5 language mode, and targets iOS 17.5 or later. Open `ExpenseTracker.xcodeproj` on a Mac and select the shared `ExpenseTracker` scheme and an installed iPhone simulator.
+## Build and verification
+
+Requires a Mac with compatible Xcode and an installed iOS simulator (deployment target iOS 17.5+, Swift 5 language mode). Open `ExpenseTracker.xcodeproj`, choose the shared `ExpenseTracker` scheme, then run:
 
 ```sh
 xcodebuild test -project ExpenseTracker.xcodeproj -scheme ExpenseTracker \
@@ -20,25 +24,18 @@ xcodebuild test -project ExpenseTracker.xcodeproj -scheme ExpenseTracker \
   CODE_SIGNING_ALLOWED=NO
 ```
 
-GitHub Actions runs simulator build, unit tests, and UI smoke tests on `macos-15` for branch pushes and pull requests, and retains the `.xcresult` bundle. Branch push validation allows tests to pass before opening a PR. CI uses the runner's default Xcode and prints its version; it does not verify device signing or an App Store archive.
+The macOS GitHub Actions workflow builds and runs XCTest and UI tests, preserving the `.xcresult` artifact. Unit tests cover persistence/reload, editing/deletion, corrupt-file preservation, failed writes, amount/date validation, monthly totals, search, sample-data protection, and recent ordering. UI automation covers adding an expense and transaction navigation. `--uitesting` uses an in-memory ledger to isolate UI tests from personal data.
 
-## Day 1 audit
+Linux cannot compile SwiftUI/UIKit/Combine or execute Xcode/XCTest. CI results establish only the tested simulator configuration. Manual layout, accessibility, physical-device behavior, signing, archives, and distribution remain unverified. Check the PR's CI result; source and a workflow file alone do not establish build success.
 
-Baseline: `93288ff` (June 24, 2024). No existing issues or open PRs were found at triage; no CI or shared scheme existed. Original unit tests were empty templates and UI tests only launched the app.
+## Live status
 
-- No external package dependencies are configured. Charts use Apple's `Charts` framework; the previous README's SwiftUICharts dependency claim was incorrect.
-- The existing iOS 17.5 target supports the visible NavigationStack, Charts, previews, and toolbar APIs. Current SDK compilation and deprecation warnings require macOS CI; Linux source inspection cannot establish build success.
-- Initial CI on Xcode 16.4 / iOS 18.5 SDK exposed a compile error in the amount color ternary (`HierarchicalShapeStyle` versus `Color`); both branches now explicitly use `Color`.
-- Recent transactions previously depended on endpoint ordering. They now sort by date before taking five; regression tests use bundled data without a network request.
-- Remaining risks: date parsing still substitutes today's date on invalid input; monthly grouping uses formatted strings; the remote sample endpoint's availability was not verified; network fallback has no visible error/sample-data indication; the full transaction view has no scroll container. These require follow-up validation and small fixes, not new features.
-- The checked-in development team and bundle identifiers are historical project configuration. Distribution ownership, signing, and release status need Amartya's confirmation. No licence file is present; no licence is inferred.
+**Not live yet — blocked by Apple signing/distribution setup, a verified release archive, and no supplied App Store or TestFlight URL.** There is no web demo; this is a native iOS app. No external API credentials are needed for the implemented offline features.
 
-## Day 2 audit
+## Program history
 
-- Fixed-format endpoint dates now use `en_US_POSIX` and the Gregorian calendar, so a device's selected calendar cannot reinterpret the year. Regression tests cover month/day order, leap day, and year boundaries.
-- Invalid-date handling remains unresolved: the existing parser substitutes today's date. Changing this safely needs a separate data-validation policy; no synthetic replacement date is introduced here.
-- No third-party packages are configured to update. Layout/scrolling and device-specific behavior remain unverified and unchanged. Linux cannot execute XCTest or Xcode; consult the branch/PR macOS CI result for build and test evidence.
+- [Day 1 PR #2](https://github.com/Amartya2001-droid/ExpenseTracker/pull/2): CI/shared scheme, latest-five sorting, tests, and a colour type compile fix; macOS CI passed.
+- [Day 2 PR #3](https://github.com/Amartya2001-droid/ExpenseTracker/pull/3): Gregorian/POSIX date parsing; branch macOS CI passed before opening.
+- Core tracker work follows Amartya's expanded product scope. The Day 3 branch starts from main after merged PR #4 and targets main directly; it is not stacked on an unmerged branch.
 
-## Contributing
-
-Follow [AGENTS.md](AGENTS.md): work on a branch, pass tests before opening a PR, and report in the [daily log](https://github.com/Amartya2001-droid/ExpenseTracker/issues/1). Day 1 adds no product features.
+Follow [AGENTS.md](AGENTS.md): branch and PR for changes, passing tests before a PR, no secrets, honest status, and reports in the [daily log](https://github.com/Amartya2001-droid/ExpenseTracker/issues/1). No licence is inferred; none is supplied.
