@@ -1,6 +1,25 @@
 import XCTest
 
 final class ExpenseTrackerUITests: XCTestCase {
+    func testSaveCategoryBudget() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--uitesting"]
+        app.launch()
+        app.buttons["Budgets"].tap()
+        let amount = app.textFields["Monthly limit (USD)"]
+        XCTAssertTrue(amount.waitForExistence(timeout: 5))
+        amount.tap()
+        amount.typeText("100")
+        app.buttons["Save Limit"].tap()
+        XCTAssertTrue(app.staticTexts["budgetFeedback"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["budgetFeedback"].label.hasPrefix("Budget saved"))
+        app.buttons["Next Month"].tap()
+        XCTAssertEqual(app.textFields["Monthly limit (USD)"].value as? String, "Monthly limit (USD)")
+        app.buttons["Previous Month"].tap()
+        XCTAssertEqual(app.textFields["Monthly limit (USD)"].value as? String, "100.00")
+    }
+
     func testAddExpenseFromEmptyLedger() {
         continueAfterFailure = false
         let app = XCUIApplication()

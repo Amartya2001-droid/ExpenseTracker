@@ -53,7 +53,10 @@ struct ContentView: View {
                 }.padding(.vertical)
             }
             .navigationTitle("ExpenseTracker").navigationBarTitleDisplayMode(.inline)
-            .toolbar { Button { showingEntry = true } label: { Label("Add Transaction", systemImage: "plus") } }
+            .toolbar {
+                NavigationLink { BudgetView(model: viewModel) } label: { Label("Budgets", systemImage: "chart.bar") }
+                Button { showingEntry = true } label: { Label("Add Transaction", systemImage: "plus") }
+            }
             .sheet(isPresented: $showingEntry) { TransactionEditor(model: viewModel) }
             .alert("Could Not Save", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
                 Button("OK") { errorMessage = nil }
@@ -121,3 +124,123 @@ struct TransactionEditor: View {
 }
 
 #Preview { ContentView() }
+
+struct BudgetView: View {
+    @ObservedObject var model: TransactionListViewModel
+    @StateObject private var store = BudgetStore()
+    @State private var month = BudgetStore.calendar.dateInterval(of: .month, for: Date())?.start ?? Date()
+    @FocusState private var amountFocused: Bool
+    @State private var category = "Food & Dining"
+    @State private var amount = ""
+    @State private var feedback: String?
+    @State private var errorMessage: String?
+
+    private var monthKey: String { BudgetStore.monthKey(for: month) }
+    private var insights: [CategorySpending] { store.insights(for: monthKey, transactions: model.transactions) }
+    private var categories: [String] {
+        Array(Set(BudgetStore.categories + model.transactions.filter(\.isExpense).map(\.category) + store.budgets.map(\.category))).sorted()
+    }
+    private var monthTitle: String {
+        let formatter = DateFormatter()
+        formatter.locale = .current
+        formatter.calendar = BudgetStore.calendar
+        formatter.dateFormat = "LLLL yyyy"
+        return formatter.string(from: month)
+    }
+    private func dollars(_ cents: Int64) -> String { (Double(cents) / 100).formatted(.currency(code: "USD")) }
+
+    var body: some View {
+        List {
+            Section {
+                HStack {
+                    Button { moveMonth(-1) } label: { Image(systemName: "chevron.left") }.accessibilityLabel("Previous Month")
+                    Spacer()
+                    Text(monthTitle).font(.headline).accessibilityIdentifier("budgetMonth")
+                    Spacer()
+                    Button { moveMonth(1) } label: { Image(systemName: "chevron.right") }.accessibilityLabel("Next Month")
+                }.buttonStyle(.borderless)
+                Text("Category limits apply only to this Gregorian month. Unbudgeted categories still appear below. Income and transfers are excluded.").font(.caption).foregroundStyle(.secondary)
+            }
+            if let message = store.storageError { Section { Text(message).foregroundStyle(.red) } }
+            if let message = model.storageError { Section { Text(message).foregroundStyle(.red) } }
+            Section("Set a Category Limit") {
+                Picker("Category", selection: $category) { ForEach(categories, id: \.self) { Text($0).tag($0) } }
+                TextField("Monthly limit (USD)", text: $amount).keyboardType(.decimalPad).focused($amountFocused)
+                if let feedback { Text(feedback).foregroundStyle(.secondary).accessibilityIdentifier("budgetFeedback") }
+            }
+            Section("Spending by Category") {
+                if insights.isEmpty {
+                    Text("No spending or limits this month. Set a limit above to get started.").foregroundStyle(.secondary)
+                }
+                ForEach(insights) { insight in
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text(insight.category).font(.headline)
+                            Spacer()
+                            Text(dollars(insight.spentCents) + " spent")
+                        }
+                        if let limit = insight.limitCents, let remaining = insight.remainingCents {
+                            Text("Limit: " + dollars(limit))
+                            ProgressView(value: insight.progress).tint(remaining < 0 ? .red : .blue)
+                                .accessibilityLabel(insight.category + " budget used")
+                            Text(remaining < 0 ? "Over by " + dollars(-remaining) : "Remaining: " + dollars(remaining))
+                                .foregroundStyle(remaining < 0 ? Color.red : Color.secondary)
+                            Button("Edit Limit") {
+                                category = insight.category
+                                amount = (Double(limit) / 100).formatted(.number.grouping(.never).precision(.fractionLength(2)))
+                                feedback = "Editing \(category). Update the limit above and tap Save Limit."
+                            }.buttonStyle(.borderless)
+                        } else { Text("No budget set").foregroundStyle(.secondary) }
+                    }
+                    .padding(.vertical, 4)
+                    .swipeActions {
+                        if insight.limitCents != nil {
+                            Button("Remove Limit", role: .destructive) {
+                                do {
+                                    try store.remove(month: monthKey, category: insight.category)
+                                    loadSelectedLimit()
+                                    feedback = "Limit removed. Transactions are unchanged."
+                                } catch { errorMessage = error.localizedDescription }
+                            }
+                        }
+                    }
+                }
+            }
+            Section { Text("Budgets stay on this device. They do not repeat or roll over automatically; set each month's limits separately. Removing a limit never deletes spending.").font(.caption) }
+        }
+        .navigationTitle("Budgets")
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Save Limit") { saveLimit() }.disabled(store.storageError != nil)
+            }
+        }
+        .scrollDismissesKeyboard(.interactively)
+        .onAppear { loadSelectedLimit() }
+        .onChange(of: category) { _, _ in loadSelectedLimit() }
+        .alert("Could Not Save Budget", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
+            Button("OK") { errorMessage = nil }
+        } message: { Text(errorMessage ?? "") }
+    }
+
+    private func loadSelectedLimit() {
+        if let limit = store.budgets.first(where: { $0.month == monthKey && $0.category == category }) {
+            amount = (Double(limit.limitCents) / 100).formatted(.number.grouping(.never).precision(.fractionLength(2)))
+        } else { amount = "" }
+        feedback = nil
+    }
+
+    private func moveMonth(_ offset: Int) {
+        guard let next = BudgetStore.calendar.date(byAdding: .month, value: offset, to: month),
+              (1...9999).contains(BudgetStore.calendar.component(.year, from: next)) else { return }
+        month = next
+        loadSelectedLimit()
+    }
+
+    private func saveLimit() {
+        do {
+            try store.setLimit(month: monthKey, category: category, amount: amount)
+            amountFocused = false
+            feedback = "Budget saved for \(monthTitle)."
+        } catch { errorMessage = error.localizedDescription }
+    }
+}
