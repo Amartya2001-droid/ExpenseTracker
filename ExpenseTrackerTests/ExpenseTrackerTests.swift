@@ -170,7 +170,7 @@ final class BudgetTests: XCTestCase {
 
     func testInvalidBudgetsLeaveStoreUnchangedAndSupportLocalDecimalSeparator() throws {
         let store = BudgetStore(inMemory: true)
-        for month in ["2026-00", "2026-13", "0000-01", "2026-1", "bad"] {
+        for month in ["2026-00", "2026-13", "0000-01", "2026-1", "2026-11\n", "bad"] {
             XCTAssertThrowsError(try store.setLimit(month: month, category: "Food", amount: "10", locale: locale))
         }
         for amount in ["0", "-1", "1.001", "NaN", "1000000000"] {
@@ -198,7 +198,7 @@ final class BudgetTests: XCTestCase {
         }
     }
 
-    func testBudgetWriteFailureLeavesStateUnchangedAndLedgerUntouched() throws {
+    func testBudgetWriteFailureLeavesStateUnchanged() throws {
         let parent = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: parent) }
         let store = BudgetStore(inMemory: true, storageURL: parent.appendingPathComponent("budgets.json"))
@@ -206,5 +206,21 @@ final class BudgetTests: XCTestCase {
         XCTAssertThrowsError(try store.setLimit(month: "2026-11", category: "Food", amount: "10", locale: locale))
         XCTAssertTrue(store.budgets.isEmpty)
         XCTAssertEqual(try Data(contentsOf: parent), Data("blocked".utf8))
+    }
+}
+
+extension BudgetTests {
+    func testBudgetChangesDoNotRewriteTransactionLedger() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let ledgerURL = directory.appendingPathComponent("transactions.json")
+        let model = TransactionListViewModel(fetchOnInit: false, storageURL: ledgerURL)
+        try model.save(entry(id: 1, amount: 5))
+        let original = try Data(contentsOf: ledgerURL)
+        let store = BudgetStore(inMemory: true, storageURL: directory.appendingPathComponent("budgets.json"))
+        try store.setLimit(month: "2026-11", category: "Food & Dining", amount: "50", locale: locale)
+        try store.remove(month: "2026-11", category: "Food & Dining")
+        XCTAssertEqual(try Data(contentsOf: ledgerURL), original)
+        XCTAssertEqual(TransactionListViewModel(fetchOnInit: false, storageURL: ledgerURL).transactions.count, 1)
     }
 }
