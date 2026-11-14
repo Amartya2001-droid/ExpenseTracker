@@ -21,6 +21,8 @@
 		AE988B1E2C23062300DF7381 /* ExpenseTrackerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE988B1D2C23062300DF7381 /* ExpenseTrackerTests.swift */; };
 		AE988B282C23062300DF7381 /* ExpenseTrackerUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE988B272C23062300DF7381 /* ExpenseTrackerUITests.swift */; };
 		AE988B2A2C23062300DF7381 /* ExpenseTrackerUITestsLaunchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE988B292C23062300DF7381 /* ExpenseTrackerUITestsLaunchTests.swift */; };
+		A50000000000000000000001 /* RecurringExpense.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000003 /* RecurringExpense.swift */; };
+		A50000000000000000000002 /* RecurringExpenseView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000004 /* RecurringExpenseView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -58,6 +60,8 @@
 		AE988B232C23062300DF7381 /* ExpenseTrackerUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ExpenseTrackerUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		AE988B272C23062300DF7381 /* ExpenseTrackerUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExpenseTrackerUITests.swift; sourceTree = "<group>"; };
 		AE988B292C23062300DF7381 /* ExpenseTrackerUITestsLaunchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExpenseTrackerUITestsLaunchTests.swift; sourceTree = "<group>"; };
+		A50000000000000000000003 /* RecurringExpense.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecurringExpense.swift; sourceTree = "<group>"; };
+		A50000000000000000000004 /* RecurringExpenseView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecurringExpenseView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -110,6 +114,8 @@
 			children = (
 				AE988B0C2C23062100DF7381 /* ExpenseTrackerApp.swift */,
 				AE988B0E2C23062100DF7381 /* ContentView.swift */,
+				A50000000000000000000004 /* RecurringExpenseView.swift */,
+				A50000000000000000000003 /* RecurringExpense.swift */,
 				AE988B402C23080000DF7381 /* Transaction.swift */,
 				AE988B422C23080000DF7381 /* Extensions.swift */,
 				AE988B442C23080000DF7381 /* MockData.swift */,
@@ -279,6 +285,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				AE988B0F2C23062100DF7381 /* ContentView.swift in Sources */,
+				A50000000000000000000002 /* RecurringExpenseView.swift in Sources */,
+				A50000000000000000000001 /* RecurringExpense.swift in Sources */,
 				AE988B412C23080000DF7381 /* Transaction.swift in Sources */,
 				AE988B432C23080000DF7381 /* Extensions.swift in Sources */,
 				AE988B452C23080000DF7381 /* MockData.swift in Sources */,

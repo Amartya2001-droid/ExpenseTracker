@@ -28,6 +28,8 @@ struct TransactionRow: View {
                     .fontWeight(.semibold)
                     .lineLimit(1)
 
+                if transaction.recurringID != nil { Label("Recurring", systemImage: "repeat").font(.caption).foregroundStyle(.secondary) }
+
                 Text(transaction.category)
                     .font(.footnote)
                     .foregroundStyle(.secondary)

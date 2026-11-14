@@ -18,11 +18,22 @@ The previous automatic remote sample fetch is removed: your personal ledger cann
 
 Open **Budgets** from Overview. Choose a month with the previous/next buttons, choose a category, enter a positive USD limit and tap **Save Limit**. Saving again updates that category in that month. Tap **Edit Limit** to fill the form with an existing limit, or swipe a budget row to **Remove Limit**. Removing a limit never removes transactions.
 
-- Limits apply to one Gregorian calendar month in the device's local time zone; they do not automatically repeat, roll over, or notify you. Recurring expenses are the next roadmap feature.
+- Limits apply to one Gregorian calendar month in the device's local time zone; they do not automatically repeat, roll over, or notify you. Recurring schedules can post ledger expenses, but budget limits remain month-specific.
 - Category rows show spending, a capped progress bar, and the amount remaining or over the limit. Categories without a budget still show spending; budgets without spending show the full amount remaining. Income and transfers are excluded from these insights.
 - Limits and category spending comparisons use integer USD cents, converting each validated ledger entry separately. The underlying ledger and its original Overview totals still use Double.
 - Budgets are saved atomically in a separate, file-protected `budgets.json`; transaction storage is unchanged. Unreadable/invalid/duplicate budgets preserve the original file and block budget changes. Failed writes leave in-memory limits unchanged. There is no backup/restore UI yet.
 - Categories match the ledger's exact category names. Limits are not one combined monthly allowance; unbudgeted spending remains visible, and no automatic categorization or predictions are claimed.
+
+## Recurring expenses
+
+Open **Recurring** from Overview, then **Add Schedule**. Enter a description, positive USD amount, category/account, first date, and weekly or monthly cadence. Save to create the schedule; due entries are then added to the ledger. They are marked **Recurring** and participate in ordinary totals and budget insights. Future scheduled entries are not counted as spending before they are posted.
+
+- Posting runs when Overview appears, when the app returns to the foreground, after dismissing a schedule editor, or via **Post Due**. There is no background execution guarantee, notification service, bank connection or actual payment action. If you do not open the app, missed dates wait for the next posting pass.
+- Weekly schedules use seven Gregorian local-calendar days. Monthly schedules retain the anchor day: January 31 → February 28/29 → March 31. Dates use the device's local time zone, not elapsed UTC hours.
+- Tap a schedule to edit future postings. Its **Next date** must be today or later. Changing amount/details while keeping the same next date/cadence retains the original monthly anchor; choosing a different next date/cadence starts a new future schedule. Existing ledger entries stay unchanged.
+- Swipe a schedule to **Delete Schedule**; posted history remains. Edit/delete individual occurrences in **See All** like ordinary entries. A deleted occurrence is not recreated; persistent occurrence keys and checkpoints prevent duplicates, including after restart or schedule edits. Creating an entirely new schedule creates a new identity and can intentionally post new entries on the same date.
+- A posting pass handles at most 500 schedule steps across all schedules. For a large backlog, tap **Post Due** again. Posting errors are shown and leave the previous ledger/checkpoints unchanged.
+- `transactions.json` now stores a versioned snapshot containing entries, schedules and posting history, written atomically with iOS file protection. Existing array-only ledgers still load and migrate on the next successful mutation; unreadable/unknown-version snapshots are preserved and block changes. Budget storage remains independent. Posting history is retained after deletion, so storage grows with usage. There is still no backup/restore UI; older app versions cannot read the new snapshot format.
 
 ## Build and verification
 
@@ -34,7 +45,7 @@ xcodebuild test -project ExpenseTracker.xcodeproj -scheme ExpenseTracker \
   CODE_SIGNING_ALLOWED=NO
 ```
 
-The macOS GitHub Actions workflow builds and runs XCTest and UI tests, preserving the `.xcresult` artifact. Unit tests cover persistence/reload, editing/deletion, corrupt-file preservation, failed writes, amount/date validation, monthly totals, search, sample-data protection, recent ordering, budget CRUD/reload, month/category isolation, cents arithmetic, unbudgeted spending, transfer/income exclusions and budget storage failures. UI automation covers adding an expense, transaction navigation, saving a budget and switching months. `--uitesting` uses an in-memory ledger and budget store to isolate UI tests from personal data.
+The macOS GitHub Actions workflow builds and runs XCTest and UI tests, preserving the `.xcresult` artifact. Unit tests cover persistence/reload, editing/deletion, corrupt-file preservation, failed writes, amount/date validation, monthly totals, search, sample-data protection, recent ordering, budget CRUD/reload, month/category isolation, cents arithmetic, unbudgeted spending, transfer/income exclusions and budget storage failures. Recurring tests cover anchored month ends/leap years, weekly dates, due-only/idempotent posting, deleted occurrence protection, future edits/removal, legacy migration/reload, bounded catch-up and atomic failure/corrupt snapshot handling. UI automation covers adding an expense, transaction navigation, saving a budget/switching months, and creating a recurring schedule that posts into the ledger. `--uitesting` uses an in-memory ledger and budget store to isolate UI tests from personal data.
 
 Linux cannot compile SwiftUI/UIKit/Combine or execute Xcode/XCTest. CI results establish only the tested simulator configuration. Manual layout, accessibility, physical-device behavior, signing, archives, and distribution remain unverified. Check the PR's CI result; source and a workflow file alone do not establish build success.
 
@@ -47,7 +58,8 @@ Linux cannot compile SwiftUI/UIKit/Combine or execute Xcode/XCTest. CI results e
 - [Day 1 PR #2](https://github.com/Amartya2001-droid/ExpenseTracker/pull/2): CI/shared scheme, latest-five sorting, tests, and a colour type compile fix; macOS CI passed.
 - [Day 2 PR #3](https://github.com/Amartya2001-droid/ExpenseTracker/pull/3): Gregorian/POSIX date parsing; branch macOS CI passed before opening.
 - [Day 3 PR #6](https://github.com/Amartya2001-droid/ExpenseTracker/pull/6) is merged: persistent offline ledger, with passing branch and PR macOS CI.
-- Day 4 budgets implement [issue #7](https://github.com/Amartya2001-droid/ExpenseTracker/issues/7), on a fresh branch from main after #6.
+- [Day 4 PR #8](https://github.com/Amartya2001-droid/ExpenseTracker/pull/8) is merged: monthly category budgets and spending insights.
+- Day 5 recurring expenses implement [issue #9](https://github.com/Amartya2001-droid/ExpenseTracker/issues/9), from main after #8. The next roadmap priority is ledger backup/export.
 - Core tracker work follows Amartya's expanded product scope. The Day 3 branch starts from main after merged PR #4 and targets main directly; it is not stacked on an unmerged branch.
 
 Follow [AGENTS.md](AGENTS.md): branch and PR for changes, passing tests before a PR, no secrets, honest status, and reports in the [daily log](https://github.com/Amartya2001-droid/ExpenseTracker/issues/1). No licence is inferred; none is supplied.
