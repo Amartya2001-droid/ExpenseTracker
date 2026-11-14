@@ -107,3 +107,105 @@ final class TransactionListViewModel: ObservableObject {
     var balance: Double { totalIncome - totalExpenses }
     var recentTransactions: [Transaction] { Array(filteredTransactions().prefix(5)) }
 }
+
+// Budget limits are independent of transactions and stored in integer USD cents.
+struct CategoryBudget: Codable, Equatable {
+    let month: String
+    let category: String
+    let limitCents: Int64
+}
+
+struct CategorySpending: Identifiable {
+    var id: String { category }
+    let category: String
+    let spentCents: Int64
+    let limitCents: Int64?
+    var remainingCents: Int64? { limitCents.map { $0 - spentCents } }
+    var progress: Double { guard let limit = limitCents else { return 0 }; return min(Double(spentCents) / Double(limit), 1) }
+}
+
+final class BudgetStore: ObservableObject {
+    @Published private(set) var budgets: [CategoryBudget] = []
+    @Published private(set) var storageError: String?
+    private let storageURL: URL?
+    private var loadFailed = false
+    static let categories = ["Food & Dining", "Shopping", "Transport", "Housing", "Utilities", "Health", "Entertainment", "Other"]
+    static var calendar: Calendar { Calendar(identifier: .gregorian) }
+
+    static func monthKey(for date: Date) -> String {
+        let parts = calendar.dateComponents([.year, .month], from: date)
+        return String(format: "%04d-%02d", parts.year ?? 0, parts.month ?? 0)
+    }
+
+    init(inMemory: Bool = false, storageURL: URL? = nil) {
+        self.storageURL = storageURL ?? (inMemory || ProcessInfo.processInfo.arguments.contains("--uitesting") ? nil : FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?.appendingPathComponent("budgets.json"))
+        guard let url = self.storageURL, FileManager.default.fileExists(atPath: url.path) else { return }
+        do {
+            let saved = try JSONDecoder().decode([CategoryBudget].self, from: Data(contentsOf: url))
+            var seen = Set<String>()
+            for budget in saved {
+                try Self.validate(budget)
+                guard seen.insert(budget.month + ":" + budget.category).inserted else { throw BudgetError.invalid }
+            }
+            budgets = saved
+        } catch {
+            loadFailed = true
+            storageError = "Saved budgets could not be read. The file is preserved and budget changes are blocked. Your transaction ledger is unchanged."
+        }
+    }
+
+    enum BudgetError: LocalizedError {
+        case invalid, unreadable
+        var errorDescription: String? {
+            switch self {
+            case .invalid: return "Choose a category and a valid month, with a positive USD limit up to $999,999,999.99."
+            case .unreadable: return "Budget changes are blocked because the saved file could not be read. Restore a valid budgets.json backup first."
+            }
+        }
+    }
+
+    private static func validate(_ budget: CategoryBudget) throws {
+        guard budget.month.count == 7, budget.month.range(of: #"^(?!0000)[0-9]{4}-(0[1-9]|1[0-2])$"#, options: .regularExpression) != nil,
+              !budget.category.isEmpty, budget.category == budget.category.trimmingCharacters(in: .whitespacesAndNewlines),
+              budget.limitCents > 0, budget.limitCents <= 99_999_999_999 else { throw BudgetError.invalid }
+    }
+
+    private func persist(_ updated: [CategoryBudget]) throws {
+        guard !loadFailed else { throw BudgetError.unreadable }
+        if let url = storageURL {
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try JSONEncoder().encode(updated).write(to: url, options: [.atomic, .completeFileProtection])
+        }
+        budgets = updated
+    }
+
+    func setLimit(month: String, category: String, amount: String, locale: Locale = .current) throws {
+        let parsed = try Transaction.parseAmount(amount, locale: locale)
+        let budget = CategoryBudget(month: month, category: category.trimmingCharacters(in: .whitespacesAndNewlines), limitCents: Int64((parsed * 100).rounded()))
+        try Self.validate(budget)
+        var updated = budgets.filter { $0.month != month || $0.category != budget.category }
+        updated.append(budget)
+        try persist(updated)
+    }
+
+    func remove(month: String, category: String) throws {
+        try persist(budgets.filter { $0.month != month || $0.category != category })
+    }
+
+    func insights(for month: String, transactions: [Transaction]) -> [CategorySpending] {
+        // Sum each ledger amount in cents, rather than adding binary floating-point dollars.
+        var spending: [String: Int64] = [:]
+        for transaction in transactions where transaction.isExpense && !transaction.isTransfer {
+            guard let date = transaction.date.validTransactionDate, Self.monthKey(for: date) == month,
+                  transaction.amount.isFinite, transaction.amount > 0, transaction.amount <= 999_999_999.99 else { continue }
+            let cents = Int64((transaction.amount * 100).rounded())
+            let previous = spending[transaction.category, default: 0]
+            let (sum, overflow) = previous.addingReportingOverflow(cents)
+            spending[transaction.category] = overflow ? Int64.max : sum
+        }
+        let limits = Dictionary(uniqueKeysWithValues: budgets.filter { $0.month == month }.map { ($0.category, $0.limitCents) })
+        return Set(spending.keys).union(limits.keys).map { category in
+            CategorySpending(category: category, spentCents: spending[category, default: 0], limitCents: limits[category])
+        }.sorted { $0.spentCents == $1.spentCents ? $0.category < $1.category : $0.spentCents > $1.spentCents }
+    }
+}
