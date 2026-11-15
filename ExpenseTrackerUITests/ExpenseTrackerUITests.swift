@@ -19,11 +19,17 @@ final class ExpenseTrackerUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Category limits: 0"].exists)
         XCTAssertTrue(app.buttons["Export JSON Backup"].exists)
         app.buttons["Export CSV"].tap()
-        let cancel = app.buttons["Cancel"].firstMatch
+        let picker = app.otherElements["Browse View (Picker)"]
+        XCTAssertTrue(picker.waitForExistence(timeout: 15))
+        // Files exposes this control as Other on the CI simulator, not Button.
+        let cancel = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Cancel")).firstMatch
         let presented = cancel.waitForExistence(timeout: 15)
         if !presented { print("EXPORT PRESENTATION HIERARCHY: " + app.debugDescription) }
         XCTAssertTrue(presented)
         cancel.tap()
+        let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: picker)
+        XCTAssertEqual(XCTWaiter.wait(for: [dismissed], timeout: 10), .completed)
+        XCTAssertFalse(app.alerts["Could Not Export"].exists)
         XCTAssertTrue(app.staticTexts["Transactions: 1"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["Export CSV"].exists)
     }
