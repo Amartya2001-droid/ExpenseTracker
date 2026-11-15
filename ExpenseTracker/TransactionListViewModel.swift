@@ -5,6 +5,8 @@ import Combine
 final class TransactionListViewModel: ObservableObject {
     @Published var transactions: [Transaction] = []
     @Published var storageError: String?
+    @Published private(set) var recurringExpenses: [RecurringExpense] = []
+    private var postedOccurrences: Set<String> = []
     private let storageURL: URL?
     private var loadFailed = false
 
@@ -12,10 +14,27 @@ final class TransactionListViewModel: ObservableObject {
         self.storageURL = storageURL ?? (fetchOnInit && !ProcessInfo.processInfo.arguments.contains("--uitesting") ? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?.appendingPathComponent("transactions.json") : nil)
         guard let url = self.storageURL, FileManager.default.fileExists(atPath: url.path) else { return }
         do {
-            let saved = try JSONDecoder().decode([Transaction].self, from: Data(contentsOf: url))
-            guard Set(saved.map(\.id)).count == saved.count else { throw LedgerError.invalidData }
-            for transaction in saved { try validate(transaction) }
-            transactions = saved
+            let data = try Data(contentsOf: url)
+            let decoder = JSONDecoder()
+            let snapshot: LedgerSnapshot
+            if let legacy = try? decoder.decode([Transaction].self, from: data) {
+                snapshot = LedgerSnapshot(transactions: legacy, recurringExpenses: [], postedOccurrences: [])
+            } else {
+                snapshot = try decoder.decode(LedgerSnapshot.self, from: data)
+            }
+            guard snapshot.version == 1,
+                  Set(snapshot.transactions.map(\.id)).count == snapshot.transactions.count,
+                  Set(snapshot.recurringExpenses.map(\.id)).count == snapshot.recurringExpenses.count else { throw LedgerError.invalidData }
+            for transaction in snapshot.transactions { try validate(transaction) }
+            for rule in snapshot.recurringExpenses { try validateRecurring(rule) }
+            for key in snapshot.postedOccurrences {
+                let parts = key.split(separator: "|", omittingEmptySubsequences: false)
+                guard parts.count == 2, UUID(uuidString: String(parts[0])) != nil,
+                      String(parts[1]).validTransactionDate != nil else { throw LedgerError.invalidData }
+            }
+            transactions = snapshot.transactions
+            recurringExpenses = snapshot.recurringExpenses
+            postedOccurrences = snapshot.postedOccurrences
         } catch {
             loadFailed = true
             storageError = "Your saved ledger could not be read. It has been preserved. Restore a valid transactions.json backup before making changes."
@@ -33,7 +52,8 @@ final class TransactionListViewModel: ObservableObject {
     }
 
     private func validate(_ transaction: Transaction) throws {
-        guard transaction.id > 0, transaction.id < Int.max,
+        guard (transaction.recurringID == nil || UUID(uuidString: transaction.recurringID ?? "") != nil),
+              transaction.id > 0, transaction.id < Int.max,
               !transaction.merchant.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !transaction.category.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               transaction.amount.isFinite, transaction.amount > 0, transaction.amount <= 999_999_999.99,
@@ -41,13 +61,16 @@ final class TransactionListViewModel: ObservableObject {
               transaction.date.validTransactionDate != nil else { throw LedgerError.invalidData }
     }
 
-    private func persist(_ updated: [Transaction]) throws {
+    private func persist(_ updated: [Transaction], rules: [RecurringExpense]? = nil, posted: Set<String>? = nil) throws {
         guard !loadFailed else { throw LedgerError.unreadableLedger }
         if let url = storageURL {
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try JSONEncoder().encode(updated).write(to: url, options: [.atomic, .completeFileProtection])
+            let snapshot = LedgerSnapshot(transactions: updated, recurringExpenses: rules ?? recurringExpenses, postedOccurrences: posted ?? postedOccurrences)
+            try JSONEncoder().encode(snapshot).write(to: url, options: [.atomic, .completeFileProtection])
         }
         transactions = updated
+        recurringExpenses = rules ?? recurringExpenses
+        postedOccurrences = posted ?? postedOccurrences
         storageError = nil
     }
 
@@ -65,6 +88,79 @@ final class TransactionListViewModel: ObservableObject {
         // Explicit opt-in, only on an empty ledger; never overwrite personal entries.
         guard transactions.isEmpty else { return }
         try persist(Transaction.all)
+    }
+
+    private func validateRecurring(_ rule: RecurringExpense) throws {
+        guard UUID(uuidString: rule.id) != nil, !rule.merchant.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !rule.category.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              rule.amountCents > 0, rule.amountCents <= 99_999_999_999,
+              rule.startDate.validTransactionDate != nil, (0...1_000_000).contains(rule.nextIndex) else {
+            throw RecurringExpense.ScheduleError.invalid
+        }
+    }
+
+    func saveRecurring(_ rule: RecurringExpense, today: Date = Date()) throws {
+        try validateRecurring(rule)
+        var updated = recurringExpenses
+        if let index = updated.firstIndex(where: { $0.id == rule.id }) {
+            guard let start = rule.startDate.validTransactionDate,
+                  start >= RecurringExpense.calendar.startOfDay(for: today) else { throw RecurringExpense.ScheduleError.editInPast }
+            var replacement = rule
+            let previous = updated[index]
+            if previous.frequency == rule.frequency,
+               let next = previous.occurrence(at: previous.nextIndex),
+               RecurringExpense.dateString(next) == rule.startDate {
+                // Editing the amount on February's clamped date must retain January's day-31 anchor.
+                replacement.startDate = previous.startDate
+                replacement.nextIndex = previous.nextIndex
+            } else { replacement.nextIndex = 0 }
+            updated[index] = replacement
+        } else {
+            var replacement = rule
+            replacement.nextIndex = 0
+            updated.append(replacement)
+        }
+        try persist(transactions, rules: updated)
+    }
+
+    func deleteRecurring(_ id: String) throws {
+        try persist(transactions, rules: recurringExpenses.filter { $0.id != id })
+    }
+
+    /// At most 500 schedule steps per call. Checkpoints and entries are committed together.
+    @discardableResult
+    func postDueExpenses(through today: Date = Date()) throws -> Int {
+        guard !loadFailed else { throw LedgerError.unreadableLedger }
+        var updated = transactions
+        var rules = recurringExpenses
+        var posted = postedOccurrences
+        let cutoff = RecurringExpense.calendar.startOfDay(for: today)
+        var steps = 0
+        var count = 0
+        var lastID = updated.map(\.id).max() ?? 0
+        for index in rules.indices {
+            while steps < 500, let due = rules[index].occurrence(at: rules[index].nextIndex), due <= cutoff {
+                let rule = rules[index]
+                let date = RecurringExpense.dateString(due)
+                let key = rule.id + "|" + date
+                if !posted.contains(key) {
+                    guard lastID < Int.max - 1 else { throw RecurringExpense.ScheduleError.exhaustedIDs }
+                    lastID += 1
+                    let transaction = Transaction(id: lastID, date: date, institution: "Local", account: rule.account,
+                        merchant: rule.merchant, amount: Double(rule.amountCents) / 100, type: "debit", categoryId: 0,
+                        category: rule.category, isPending: false, isTransfer: false, isExpense: true,
+                        isCashPurchase: rule.account.lowercased() == "cash", recurringID: rule.id)
+                    try validate(transaction)
+                    updated.append(transaction)
+                    posted.insert(key)
+                    count += 1
+                }
+                rules[index].nextIndex += 1
+                steps += 1
+            }
+        }
+        if steps > 0 { try persist(updated, rules: rules, posted: posted) }
+        return count
     }
 
     var nextID: Int { (transactions.map(\.id).max() ?? 0) + 1 }

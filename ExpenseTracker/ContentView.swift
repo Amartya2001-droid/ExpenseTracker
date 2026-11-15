@@ -4,6 +4,7 @@ import Charts
 struct ContentView: View {
     @StateObject var viewModel = TransactionListViewModel()
     @State private var showingEntry = false
+    @Environment(\.scenePhase) private var scenePhase
     @State private var errorMessage: String?
 
     var body: some View {
@@ -54,15 +55,22 @@ struct ContentView: View {
             }
             .navigationTitle("ExpenseTracker").navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                NavigationLink { RecurringExpenseView(model: viewModel) } label: { Label("Recurring", systemImage: "repeat") }
                 NavigationLink { BudgetView(model: viewModel) } label: { Label("Budgets", systemImage: "chart.bar") }
                 Button { showingEntry = true } label: { Label("Add Transaction", systemImage: "plus") }
             }
+            .onAppear { postRecurring() }
+            .onChange(of: scenePhase) { _, phase in if phase == .active { postRecurring() } }
             .sheet(isPresented: $showingEntry) { TransactionEditor(model: viewModel) }
             .alert("Could Not Save", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
                 Button("OK") { errorMessage = nil }
             } message: { Text(errorMessage ?? "") }
         }
     }
+    private func postRecurring() {
+        do { try viewModel.postDueExpenses() } catch { errorMessage = error.localizedDescription }
+    }
+
 }
 
 struct TransactionEditor: View {
@@ -116,7 +124,7 @@ struct TransactionEditor: View {
             formatter.locale = Locale(identifier: "en_US_POSIX")
             formatter.calendar = Calendar(identifier: .gregorian)
             formatter.dateFormat = "MM/dd/yyyy"
-            let transaction = Transaction(id: existing?.id ?? model.nextID, date: formatter.string(from: date), institution: existing?.institution ?? "Local", account: account.trimmingCharacters(in: .whitespacesAndNewlines), merchant: merchant.trimmingCharacters(in: .whitespacesAndNewlines), amount: value, type: isExpense ? "debit" : "credit", categoryId: ["Food & Dining": 5, "Shopping": 8, "Transport": 1, "Housing": 6, "Utilities": 2, "Health": 11, "Entertainment": 3, "Income": 7][category] ?? 0, category: category, isPending: existing?.isPending ?? false, isTransfer: existing?.isTransfer ?? false, isExpense: isExpense, isCashPurchase: account.lowercased() == "cash")
+            let transaction = Transaction(id: existing?.id ?? model.nextID, date: formatter.string(from: date), institution: existing?.institution ?? "Local", account: account.trimmingCharacters(in: .whitespacesAndNewlines), merchant: merchant.trimmingCharacters(in: .whitespacesAndNewlines), amount: value, type: isExpense ? "debit" : "credit", categoryId: ["Food & Dining": 5, "Shopping": 8, "Transport": 1, "Housing": 6, "Utilities": 2, "Health": 11, "Entertainment": 3, "Income": 7][category] ?? 0, category: category, isPending: existing?.isPending ?? false, isTransfer: existing?.isTransfer ?? false, isExpense: isExpense, isCashPurchase: account.lowercased() == "cash", recurringID: existing?.recurringID)
             try model.save(transaction)
             dismiss()
         } catch { errorMessage = error.localizedDescription }

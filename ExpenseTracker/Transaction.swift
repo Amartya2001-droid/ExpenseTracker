@@ -22,6 +22,7 @@ struct Transaction: Identifiable, Codable, Hashable {
     let isTransfer: Bool
     let isExpense: Bool
     let isCashPurchase: Bool
+    var recurringID: String? = nil
 }
 
 extension Transaction {

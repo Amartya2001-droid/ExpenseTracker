@@ -224,3 +224,170 @@ extension BudgetTests {
         XCTAssertEqual(TransactionListViewModel(fetchOnInit: false, storageURL: ledgerURL).transactions.count, 1)
     }
 }
+
+final class RecurringExpenseTests: XCTestCase {
+    private func rule(start: String = "01/31/2026", frequency: RecurringExpense.Frequency = .monthly, cents: Int64 = 1299) -> RecurringExpense {
+        RecurringExpense(merchant: "Subscription", category: "Entertainment", account: "Card", amountCents: cents, startDate: start, frequency: frequency)
+    }
+
+    func testMonthlySchedulesClampWithoutDriftIncludingLeapYears() {
+        let monthly = rule()
+        XCTAssertEqual((0...3).compactMap { monthly.occurrence(at: $0).map(RecurringExpense.dateString) }, ["01/31/2026", "02/28/2026", "03/31/2026", "04/30/2026"])
+        XCTAssertEqual(rule(start: "01/31/2024").occurrence(at: 1).map(RecurringExpense.dateString), "02/29/2024")
+        XCTAssertEqual(rule(start: "12/31/2026").occurrence(at: 1).map(RecurringExpense.dateString), "01/31/2027")
+        XCTAssertNil(monthly.occurrence(at: -1))
+        XCTAssertNil(monthly.occurrence(at: Int.max))
+    }
+
+    func testWeeklyScheduleUsesLocalCalendarDaysAcrossYearAndDSTBoundaries() {
+        XCTAssertEqual(rule(start: "12/28/2026", frequency: .weekly).occurrence(at: 1).map(RecurringExpense.dateString), "01/04/2027")
+        XCTAssertEqual(rule(start: "03/07/2026", frequency: .weekly).occurrence(at: 1).map(RecurringExpense.dateString), "03/14/2026")
+    }
+
+    func testPostingIsIdempotentAndFutureOccurrencesDoNotAffectBalances() throws {
+        let model = TransactionListViewModel(fetchOnInit: false)
+        let schedule = rule()
+        try model.saveRecurring(schedule)
+        XCTAssertEqual(try model.postDueExpenses(through: "01/30/2026".dateParsed()), 0)
+        XCTAssertTrue(model.transactions.isEmpty)
+        XCTAssertEqual(try model.postDueExpenses(through: "02/28/2026".dateParsed()), 2)
+        XCTAssertEqual(try model.postDueExpenses(through: "02/28/2026".dateParsed()), 0)
+        XCTAssertEqual(model.transactions.map(\.date), ["01/31/2026", "02/28/2026"])
+        XCTAssertTrue(model.transactions.allSatisfy { $0.recurringID == schedule.id && $0.isExpense })
+        XCTAssertEqual(model.totalExpenses, 25.98, accuracy: 0.0001)
+        XCTAssertEqual(model.expenses(inMonth: "02/01/2026".dateParsed()), 12.99, accuracy: 0.0001)
+    }
+
+    func testLegacyMigrationReloadAndDeletedOccurrenceProtection() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("transactions.json")
+        let legacy = [Transaction.all[0]]
+        try JSONEncoder().encode(legacy).write(to: url)
+        let model = TransactionListViewModel(fetchOnInit: false, storageURL: url)
+        XCTAssertEqual(model.transactions, legacy)
+        let schedule = rule()
+        try model.saveRecurring(schedule)
+        XCTAssertEqual(try model.postDueExpenses(through: "01/31/2026".dateParsed()), 1)
+        let occurrence = try XCTUnwrap(model.transactions.first { $0.recurringID != nil })
+        try model.delete([occurrence.id])
+        let reloaded = TransactionListViewModel(fetchOnInit: false, storageURL: url)
+        XCTAssertEqual(reloaded.transactions, legacy)
+        XCTAssertEqual(try reloaded.postDueExpenses(through: "01/31/2026".dateParsed()), 0)
+        var edited = schedule
+        edited.amountCents = 2000
+        try reloaded.saveRecurring(edited, today: "01/31/2026".dateParsed())
+        XCTAssertEqual(try reloaded.postDueExpenses(through: "01/31/2026".dateParsed()), 0, "A reset schedule cannot recreate a deleted occurrence")
+        XCTAssertEqual(try reloaded.postDueExpenses(through: "02/28/2026".dateParsed()), 1)
+        XCTAssertEqual(reloaded.transactions.last?.amount, 20)
+        let snapshot = try JSONDecoder().decode(LedgerSnapshot.self, from: Data(contentsOf: url))
+        XCTAssertEqual(snapshot.version, 1)
+        XCTAssertEqual(snapshot.postedOccurrences.count, 2)
+    }
+
+    func testEditingFutureAmountPreservesMonthEndAnchorAndPostedHistory() throws {
+        let model = TransactionListViewModel(fetchOnInit: false)
+        let schedule = rule()
+        try model.saveRecurring(schedule)
+        try model.postDueExpenses(through: "01/31/2026".dateParsed())
+        var edited = schedule
+        edited.startDate = "02/28/2026"
+        edited.amountCents = 2000
+        try model.saveRecurring(edited, today: "02/01/2026".dateParsed())
+        try model.postDueExpenses(through: "03/31/2026".dateParsed())
+        XCTAssertEqual(model.transactions.map(\.date), ["01/31/2026", "02/28/2026", "03/31/2026"])
+        XCTAssertEqual(model.transactions.map(\.amount), [12.99, 20, 20])
+        try model.deleteRecurring(schedule.id)
+        XCTAssertTrue(model.recurringExpenses.isEmpty)
+        XCTAssertEqual(try model.postDueExpenses(through: "12/31/2026".dateParsed()), 0)
+        XCTAssertEqual(model.transactions.count, 3)
+    }
+
+    func testEditedOccurrenceKeepsItsRecurringIdentity() throws {
+        let model = TransactionListViewModel(fetchOnInit: false)
+        try model.saveRecurring(rule())
+        try model.postDueExpenses(through: "01/31/2026".dateParsed())
+        let transaction = try XCTUnwrap(model.transactions.first)
+        let edited = Transaction(id: transaction.id, date: transaction.date, institution: transaction.institution,
+            account: transaction.account, merchant: "Edited subscription", amount: 42, type: transaction.type,
+            categoryId: transaction.categoryId, category: transaction.category, isPending: false,
+            isTransfer: false, isExpense: true, isCashPurchase: false, recurringID: transaction.recurringID)
+        try model.save(edited)
+        XCTAssertEqual(try model.postDueExpenses(through: "01/31/2026".dateParsed()), 0)
+        XCTAssertEqual(model.transactions.first?.recurringID, transaction.recurringID)
+        XCTAssertEqual(model.transactions.first?.merchant, "Edited subscription")
+        XCTAssertEqual(model.totalExpenses, 42)
+    }
+
+    func testScheduleReschedulingAndInvalidInputs() throws {
+        let model = TransactionListViewModel(fetchOnInit: false)
+        for cents in [Int64(0), -1, 100_000_000_000] {
+            XCTAssertThrowsError(try model.saveRecurring(rule(cents: cents)))
+        }
+        XCTAssertThrowsError(try model.saveRecurring(rule(start: "02/29/2025")))
+        var invalid = rule(); invalid.merchant = "  "
+        XCTAssertThrowsError(try model.saveRecurring(invalid))
+        XCTAssertTrue(model.recurringExpenses.isEmpty)
+        let schedule = rule()
+        try model.saveRecurring(schedule)
+        var changed = schedule
+        changed.startDate = "02/01/2026"
+        XCTAssertThrowsError(try model.saveRecurring(changed, today: "02/02/2026".dateParsed()))
+        changed.startDate = "02/02/2026"; changed.frequency = .weekly
+        try model.saveRecurring(changed, today: "02/02/2026".dateParsed())
+        XCTAssertEqual(try model.postDueExpenses(through: "02/09/2026".dateParsed()), 2)
+        XCTAssertEqual(model.transactions.map(\.date), ["02/02/2026", "02/09/2026"])
+    }
+
+    func testCatchUpIsBoundedAndCanResume() throws {
+        let model = TransactionListViewModel(fetchOnInit: false)
+        try model.saveRecurring(rule(start: "01/01/2010", frequency: .weekly))
+        XCTAssertEqual(try model.postDueExpenses(through: "01/01/2026".dateParsed()), 500)
+        let next = model.recurringExpenses[0].nextIndex
+        XCTAssertEqual(next, 500)
+        let second = try model.postDueExpenses(through: "01/01/2026".dateParsed())
+        XCTAssertGreaterThan(second, 0)
+        XCTAssertLessThan(second, 500)
+        XCTAssertEqual(try model.postDueExpenses(through: "01/01/2026".dateParsed()), 0)
+        XCTAssertEqual(Set(model.transactions.map(\.id)).count, model.transactions.count)
+    }
+
+    func testFailedPostingCommitsNeitherEntriesNorCheckpoints() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("transactions.json")
+        let model = TransactionListViewModel(fetchOnInit: false, storageURL: url)
+        try model.saveRecurring(rule())
+        let original = try Data(contentsOf: url)
+        try FileManager.default.removeItem(at: url)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: false)
+        XCTAssertThrowsError(try model.postDueExpenses(through: "01/31/2026".dateParsed()))
+        XCTAssertTrue(model.transactions.isEmpty)
+        XCTAssertEqual(model.recurringExpenses[0].nextIndex, 0)
+        try FileManager.default.removeItem(at: url)
+        try original.write(to: url)
+        let reloaded = TransactionListViewModel(fetchOnInit: false, storageURL: url)
+        XCTAssertEqual(try reloaded.postDueExpenses(through: "01/31/2026".dateParsed()), 1)
+        XCTAssertEqual(try reloaded.postDueExpenses(through: "01/31/2026".dateParsed()), 0)
+    }
+
+    func testCorruptSnapshotPreservedAndScheduleMutationsBlocked() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let schedule = rule()
+        var unknown = LedgerSnapshot(transactions: [], recurringExpenses: [], postedOccurrences: [])
+        unknown.version = 2
+        for snapshot in [unknown, LedgerSnapshot(transactions: [], recurringExpenses: [schedule, schedule], postedOccurrences: []),
+                         LedgerSnapshot(transactions: [], recurringExpenses: [], postedOccurrences: ["invalid"])] {
+            let original = try JSONEncoder().encode(snapshot)
+            try original.write(to: url)
+            let model = TransactionListViewModel(fetchOnInit: false, storageURL: url)
+            XCTAssertNotNil(model.storageError)
+            XCTAssertThrowsError(try model.saveRecurring(schedule))
+            XCTAssertThrowsError(try model.deleteRecurring(schedule.id))
+            XCTAssertThrowsError(try model.postDueExpenses())
+            XCTAssertEqual(try Data(contentsOf: url), original)
+        }
+    }
+}

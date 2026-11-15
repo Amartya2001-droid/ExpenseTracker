@@ -1,6 +1,25 @@
 import XCTest
 
 final class ExpenseTrackerUITests: XCTestCase {
+    func testRecurringSchedulePostsIntoLedger() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--uitesting"]
+        app.launch()
+        app.buttons["Recurring"].tap()
+        app.buttons["Add Schedule"].tap()
+        let description = app.textFields["Recurring description"]
+        XCTAssertTrue(description.waitForExistence(timeout: 5))
+        description.tap(); description.typeText("Monthly subscription")
+        let amount = app.textFields["Recurring amount (USD)"]
+        amount.tap(); amount.typeText("15")
+        app.buttons["Save Schedule"].tap()
+        XCTAssertTrue(app.staticTexts["Monthly subscription"].waitForExistence(timeout: 5))
+        app.buttons["Post Due"].tap()
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(app.staticTexts["Monthly subscription"].waitForExistence(timeout: 5))
+    }
+
     func testSaveCategoryBudget() {
         continueAfterFailure = false
         let app = XCUIApplication()
