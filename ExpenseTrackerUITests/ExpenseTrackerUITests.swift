@@ -20,7 +20,9 @@ final class ExpenseTrackerUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Export JSON Backup"].exists)
         app.buttons["Export CSV"].tap()
         let cancel = app.buttons["Cancel"].firstMatch
-        XCTAssertTrue(cancel.waitForExistence(timeout: 15))
+        let presented = cancel.waitForExistence(timeout: 15)
+        if !presented { print("EXPORT PRESENTATION HIERARCHY: " + app.debugDescription) }
+        XCTAssertTrue(presented)
         cancel.tap()
         XCTAssertTrue(app.staticTexts["Transactions: 1"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["Export CSV"].exists)

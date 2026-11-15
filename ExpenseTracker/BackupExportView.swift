@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 struct BackupExportView: View {
     @ObservedObject var model: TransactionListViewModel
     @StateObject private var budgets = BudgetStore()
-    @State private var document: LedgerExportDocument?
+    @State private var document = LedgerExportDocument(data: Data())
     @State private var contentType: UTType = .json
     @State private var filename = "ExpenseTracker-backup"
     @State private var showingExporter = false
@@ -46,7 +46,7 @@ struct BackupExportView: View {
                     feedback = "Export cancelled. Your ledger is unchanged."
                 } else { errorMessage = error.localizedDescription }
             }
-            document = nil
+            document = LedgerExportDocument(data: Data())
         }
         .alert("Could Not Export", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
             Button("OK") { errorMessage = nil }
