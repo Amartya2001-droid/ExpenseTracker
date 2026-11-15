@@ -1,6 +1,31 @@
 import XCTest
 
 final class ExpenseTrackerUITests: XCTestCase {
+    func testExportShowsSourceCountsAndCanCancelSaveDialog() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--uitesting"]
+        app.launch()
+        app.buttons["Add Transaction"].firstMatch.tap()
+        let merchant = app.textFields["Merchant or description"]
+        XCTAssertTrue(merchant.waitForExistence(timeout: 5))
+        merchant.tap(); merchant.typeText("Export test expense")
+        let amount = app.textFields["Amount (USD)"]
+        amount.tap(); amount.typeText("12.34")
+        app.buttons["Save"].tap()
+        app.buttons["Backup & Export"].tap()
+        XCTAssertTrue(app.staticTexts["Transactions: 1"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Schedules: 0"].exists)
+        XCTAssertTrue(app.staticTexts["Category limits: 0"].exists)
+        XCTAssertTrue(app.buttons["Export JSON Backup"].exists)
+        app.buttons["Export CSV"].tap()
+        let cancel = app.buttons["Cancel"].firstMatch
+        XCTAssertTrue(cancel.waitForExistence(timeout: 15))
+        cancel.tap()
+        XCTAssertTrue(app.staticTexts["Transactions: 1"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Export CSV"].exists)
+    }
+
     func testRecurringSchedulePostsIntoLedger() {
         continueAfterFailure = false
         let app = XCUIApplication()

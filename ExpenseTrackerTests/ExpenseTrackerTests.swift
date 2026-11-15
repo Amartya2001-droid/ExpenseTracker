@@ -391,3 +391,149 @@ final class RecurringExpenseTests: XCTestCase {
         }
     }
 }
+
+final class LedgerExportTests: XCTestCase {
+    private func entry(id: Int = 1, date: String = "11/15/2026", merchant: String = "Coffee", amount: Double = 12.34,
+                       expense: Bool = true, category: String = "Food & Dining", account: String = "Cash",
+                       institution: String = "Local", type: String = "debit") -> Transaction {
+        Transaction(id: id, date: date, institution: institution, account: account, merchant: merchant, amount: amount,
+            type: type, categoryId: 5, category: category, isPending: false, isTransfer: false, isExpense: expense, isCashPurchase: true)
+    }
+
+    private func decode(_ data: Data) throws -> LedgerBackup {
+        let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(LedgerBackup.self, from: data)
+    }
+
+    func testFullBackupRoundTripPreservesSchedulesBudgetsAndDeletedOccurrenceHistory() throws {
+        let model = TransactionListViewModel(fetchOnInit: false)
+        try model.save(entry(merchant: "=Original text 🍎"))
+        let rule = RecurringExpense(merchant: "Subscription", category: "Entertainment", account: "Card",
+            amountCents: 1599, startDate: "01/31/2026", frequency: .monthly)
+        try model.saveRecurring(rule)
+        try model.postDueExpenses(through: "01/31/2026".dateParsed())
+        let occurrence = try XCTUnwrap(model.transactions.first { $0.recurringID != nil })
+        try model.delete([occurrence.id])
+        let budgets = BudgetStore(inMemory: true)
+        try budgets.setLimit(month: "2026-11", category: "Food & Dining", amount: "100.25", locale: Locale(identifier: "en_US"))
+        let timestamp = Date(timeIntervalSince1970: 1_800_000_000)
+        let backup = try decode(LedgerExporter.json(model: model, budgets: budgets, at: timestamp))
+        let snapshot = try model.exportSnapshot()
+        XCTAssertEqual(backup.format, "ExpenseTracker")
+        XCTAssertEqual(backup.version, 1)
+        XCTAssertEqual(backup.currency, "USD")
+        XCTAssertEqual(backup.exportedAt, timestamp)
+        XCTAssertEqual(backup.ledger.version, 1)
+        XCTAssertEqual(backup.ledger.transactions, snapshot.transactions)
+        XCTAssertEqual(backup.ledger.recurringExpenses, snapshot.recurringExpenses)
+        XCTAssertEqual(backup.ledger.postedOccurrences, snapshot.postedOccurrences)
+        XCTAssertEqual(backup.budgets, try budgets.exportBudgets())
+        XCTAssertEqual(backup.ledger.transactions[0].merchant, "=Original text 🍎", "JSON is full-fidelity, unlike spreadsheet text protection")
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: url) }
+        try JSONEncoder().encode(backup.ledger).write(to: url)
+        let reconstructed = TransactionListViewModel(fetchOnInit: false, storageURL: url)
+        XCTAssertNil(reconstructed.storageError)
+        XCTAssertEqual(try reconstructed.postDueExpenses(through: "01/31/2026".dateParsed()), 0)
+        XCTAssertEqual(reconstructed.transactions.count, 1, "Deleted occurrence history must survive the archive")
+        XCTAssertEqual(try reconstructed.postDueExpenses(through: "02/28/2026".dateParsed()), 1)
+        XCTAssertEqual(reconstructed.transactions.last?.recurringID, rule.id)
+    }
+
+    func testExportsDoNotMutateSourceFilesOrPostFutureExpenses() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let ledgerURL = directory.appendingPathComponent("transactions.json")
+        let budgetsURL = directory.appendingPathComponent("budgets.json")
+        let model = TransactionListViewModel(fetchOnInit: false, storageURL: ledgerURL)
+        try model.save(entry())
+        let rule = RecurringExpense(merchant: "Future", category: "Other", account: "Cash", amountCents: 100, startDate: "01/01/2099", frequency: .weekly)
+        try model.saveRecurring(rule)
+        let budgets = BudgetStore(inMemory: true, storageURL: budgetsURL)
+        try budgets.setLimit(month: "2026-11", category: "Other", amount: "10", locale: Locale(identifier: "en_US"))
+        let originalLedger = try Data(contentsOf: ledgerURL)
+        let originalBudgets = try Data(contentsOf: budgetsURL)
+        _ = try LedgerExporter.json(model: model, budgets: budgets)
+        _ = try LedgerExporter.csv(model: model)
+        XCTAssertEqual(try Data(contentsOf: ledgerURL), originalLedger)
+        XCTAssertEqual(try Data(contentsOf: budgetsURL), originalBudgets)
+        XCTAssertEqual(model.transactions.count, 1)
+        XCTAssertEqual(model.recurringExpenses[0].nextIndex, 0)
+    }
+
+    func testCSVQuotesUnicodeCommasQuotesAndMultilineText() throws {
+        let model = TransactionListViewModel(fetchOnInit: false)
+        try model.save(entry(merchant: "Café, \"beans\"\r\n🍎"))
+        let csv = String(decoding: try LedgerExporter.csv(model: model), as: UTF8.self)
+        XCTAssertTrue(csv.contains("\"Café, \"\"beans\"\"\r\n🍎\""))
+        XCTAssertTrue(csv.contains("\"2026-11-15\""))
+        XCTAssertTrue(csv.contains("\"12.34\",\"-12.34\""))
+        XCTAssertTrue(csv.hasSuffix("\r\n"))
+    }
+
+    func testCSVProtectsUserTextButPreservesTrustedNegativeAmounts() throws {
+        let model = TransactionListViewModel(fetchOnInit: false)
+        try model.save(entry(merchant: "=1+1", category: "+Food", account: " \t@SUM(1)", institution: "-Bank", type: "\r\n=FORMULA"))
+        let csv = String(decoding: try LedgerExporter.csv(model: model), as: UTF8.self)
+        for protected in ["'=1+1", "'+Food", "' \t@SUM(1)", "'-Bank", "'\r\n=FORMULA"] {
+            XCTAssertTrue(csv.contains("\"" + protected + "\""), protected)
+        }
+        XCTAssertTrue(csv.contains("\"-12.34\""))
+        XCTAssertFalse(csv.contains("\"'-12.34\""))
+    }
+
+    func testCSVStableDateIDOrderingAndIncomePrecision() throws {
+        let model = TransactionListViewModel(fetchOnInit: false)
+        try model.save(entry(id: 3, date: "12/01/2026", merchant: "Last", amount: 0.01))
+        try model.save(entry(id: 2, merchant: "Second", amount: 1234.50, expense: false))
+        try model.save(entry(id: 1, merchant: "First"))
+        let csv = String(decoding: try LedgerExporter.csv(model: model), as: UTF8.self)
+        let rows = csv.components(separatedBy: "\r\n")
+        XCTAssertEqual(rows.count, 5)
+        XCTAssertTrue(rows[1].hasPrefix("\"1\",\"2026-11-15\",\"First\""))
+        XCTAssertTrue(rows[2].hasPrefix("\"2\",\"2026-11-15\",\"Second\""))
+        XCTAssertTrue(rows[2].contains("\"1234.50\",\"1234.50\""))
+        XCTAssertTrue(rows[3].contains("\"0.01\",\"-0.01\""))
+        XCTAssertEqual(try LedgerExporter.csv(model: model), try LedgerExporter.csv(model: model))
+    }
+
+    func testEmptyLedgerExportsExplicitHeadersAndCompleteEmptyBackup() throws {
+        let model = TransactionListViewModel(fetchOnInit: false)
+        let csv = String(decoding: try LedgerExporter.csv(model: model), as: UTF8.self)
+        XCTAssertEqual(csv, LedgerExporter.csvHeaders.map { "\"" + $0 + "\"" }.joined(separator: ",") + "\r\n")
+        let backup = try decode(LedgerExporter.json(model: model, budgets: BudgetStore(inMemory: true)))
+        XCTAssertTrue(backup.ledger.transactions.isEmpty)
+        XCTAssertTrue(backup.ledger.recurringExpenses.isEmpty)
+        XCTAssertTrue(backup.ledger.postedOccurrences.isEmpty)
+        XCTAssertTrue(backup.budgets.isEmpty)
+    }
+
+    func testUnreadableSourcesBlockFullBackupButBadBudgetsDoNotBlockCSV() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let ledgerURL = directory.appendingPathComponent("transactions.json")
+        let budgetsURL = directory.appendingPathComponent("budgets.json")
+        let bad = Data("corrupt source".utf8)
+        try bad.write(to: ledgerURL); try bad.write(to: budgetsURL)
+        let unreadable = TransactionListViewModel(fetchOnInit: false, storageURL: ledgerURL)
+        let badBudgets = BudgetStore(inMemory: true, storageURL: budgetsURL)
+        XCTAssertThrowsError(try LedgerExporter.json(model: unreadable, budgets: BudgetStore(inMemory: true)))
+        XCTAssertThrowsError(try LedgerExporter.csv(model: unreadable))
+        let healthy = TransactionListViewModel(fetchOnInit: false)
+        try healthy.save(entry())
+        XCTAssertThrowsError(try LedgerExporter.json(model: healthy, budgets: badBudgets))
+        XCTAssertNoThrow(try LedgerExporter.csv(model: healthy))
+        XCTAssertEqual(try Data(contentsOf: ledgerURL), bad)
+        XCTAssertEqual(try Data(contentsOf: budgetsURL), bad)
+    }
+
+    func testInvalidInMemoryEntriesCannotBeExportedAsHealthyBackup() throws {
+        let model = TransactionListViewModel(fetchOnInit: false)
+        model.transactions = [entry(), entry()]
+        XCTAssertThrowsError(try LedgerExporter.csv(model: model))
+        XCTAssertThrowsError(try LedgerExporter.json(model: model, budgets: BudgetStore(inMemory: true)))
+        model.transactions = [entry(amount: -1)]
+        XCTAssertThrowsError(try LedgerExporter.csv(model: model))
+    }
+}

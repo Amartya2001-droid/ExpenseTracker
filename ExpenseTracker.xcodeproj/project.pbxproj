@@ -23,6 +23,8 @@
 		AE988B2A2C23062300DF7381 /* ExpenseTrackerUITestsLaunchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE988B292C23062300DF7381 /* ExpenseTrackerUITestsLaunchTests.swift */; };
 		A50000000000000000000001 /* RecurringExpense.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000003 /* RecurringExpense.swift */; };
 		A50000000000000000000002 /* RecurringExpenseView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000004 /* RecurringExpenseView.swift */; };
+		A60000000000000000000001 /* LedgerExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A60000000000000000000003 /* LedgerExport.swift */; };
+		A60000000000000000000002 /* BackupExportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A60000000000000000000004 /* BackupExportView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -62,6 +64,8 @@
 		AE988B292C23062300DF7381 /* ExpenseTrackerUITestsLaunchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExpenseTrackerUITestsLaunchTests.swift; sourceTree = "<group>"; };
 		A50000000000000000000003 /* RecurringExpense.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecurringExpense.swift; sourceTree = "<group>"; };
 		A50000000000000000000004 /* RecurringExpenseView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecurringExpenseView.swift; sourceTree = "<group>"; };
+		A60000000000000000000003 /* LedgerExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LedgerExport.swift; sourceTree = "<group>"; };
+		A60000000000000000000004 /* BackupExportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupExportView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -114,6 +118,8 @@
 			children = (
 				AE988B0C2C23062100DF7381 /* ExpenseTrackerApp.swift */,
 				AE988B0E2C23062100DF7381 /* ContentView.swift */,
+				A60000000000000000000004 /* BackupExportView.swift */,
+				A60000000000000000000003 /* LedgerExport.swift */,
 				A50000000000000000000004 /* RecurringExpenseView.swift */,
 				A50000000000000000000003 /* RecurringExpense.swift */,
 				AE988B402C23080000DF7381 /* Transaction.swift */,
@@ -285,6 +291,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				AE988B0F2C23062100DF7381 /* ContentView.swift in Sources */,
+				A60000000000000000000002 /* BackupExportView.swift in Sources */,
+				A60000000000000000000001 /* LedgerExport.swift in Sources */,
 				A50000000000000000000002 /* RecurringExpenseView.swift in Sources */,
 				A50000000000000000000001 /* RecurringExpense.swift in Sources */,
 				AE988B412C23080000DF7381 /* Transaction.swift in Sources */,
