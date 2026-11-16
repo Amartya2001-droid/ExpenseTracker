@@ -30,10 +30,16 @@ final class ExpenseTrackerUITests: XCTestCase {
         // XCTest's scroll-to-visible action. Use its live center, not a fixed screen point.
         cancel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: picker)
-        XCTAssertEqual(XCTWaiter.wait(for: [dismissed], timeout: 10), .completed)
+        let dismissalResult = XCTWaiter.wait(for: [dismissed], timeout: 10)
+        if dismissalResult != .completed { print("EXPORT DISMISSAL HIERARCHY: " + app.debugDescription) }
+        XCTAssertEqual(dismissalResult, .completed)
         XCTAssertFalse(app.alerts["Could Not Export"].exists)
         XCTAssertTrue(app.staticTexts["Transactions: 1"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["Export CSV"].exists)
+        let exportButton = app.buttons["Export CSV"]
+        let usable = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in exportButton.isHittable }, object: nil)
+        let returnResult = XCTWaiter.wait(for: [usable], timeout: 10)
+        if returnResult != .completed { print("EXPORT RETURN HIERARCHY: " + app.debugDescription) }
+        XCTAssertEqual(returnResult, .completed)
     }
 
     func testRecurringSchedulePostsIntoLedger() {
