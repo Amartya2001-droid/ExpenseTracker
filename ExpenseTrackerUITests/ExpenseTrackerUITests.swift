@@ -26,7 +26,9 @@ final class ExpenseTrackerUITests: XCTestCase {
         let presented = cancel.waitForExistence(timeout: 15)
         if !presented { print("EXPORT PRESENTATION HIERARCHY: " + app.debugDescription) }
         XCTAssertTrue(presented)
-        cancel.tap()
+        // Files reports this visible control as an AX Other that cannot perform
+        // XCTest's scroll-to-visible action. Use its live center, not a fixed screen point.
+        cancel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: picker)
         XCTAssertEqual(XCTWaiter.wait(for: [dismissed], timeout: 10), .completed)
         XCTAssertFalse(app.alerts["Could Not Export"].exists)

@@ -45,7 +45,7 @@ Open **Backup & Export** near the top of Overview. The screen shows transaction,
 - Files are **unencrypted** and contain financial details/account labels. Choose a trusted destination. The app does not automatically upload them; choosing a cloud Files provider is your own save action. No API key or cloud account is required by the app.
 - **No restore/import UI, automatic backup schedule, encrypted archive, or CSV import is implemented yet.** Do not delete your original app data expecting an in-app restore today. Unit tests reconstruct the ledger component to verify backup completeness; this does not claim a shipped restore feature.
 
-Automated simulator coverage opens and cancels the Files save dialog. Actual saving/retrieval through physical-device Files providers, spreadsheet compatibility across applications, manual accessibility/layout, and release distribution remain unverified.
+Automated simulator coverage opens and cancels the Files save dialog, and verifies dismissal, absence of an export error, and unchanged source counts. The test targets the system Cancel control by its live geometry because this simulator exposes it as an AX `Other` that cannot perform XCTest's scroll-to-visible action; it does not skip the dialog or relax the dismissal assertions. Actual saving/retrieval through physical-device Files providers, spreadsheet compatibility across applications, manual accessibility/layout, and release distribution remain unverified.
 
 ## Build and verification
 
