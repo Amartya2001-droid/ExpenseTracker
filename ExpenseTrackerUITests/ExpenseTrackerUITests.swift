@@ -1,6 +1,67 @@
 import XCTest
 
 final class ExpenseTrackerUITests: XCTestCase {
+    func testExportPreviewCancellationPreservesLedger() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--uitesting"]
+        app.launch()
+        app.buttons["Add Transaction"].firstMatch.tap()
+        let merchant = app.textFields["Merchant or description"]
+        XCTAssertTrue(merchant.waitForExistence(timeout: 5))
+        merchant.tap(); merchant.typeText("Export test expense")
+        let amount = app.textFields["Amount (USD)"]
+        amount.tap(); amount.typeText("12.34")
+        app.buttons["Save"].tap()
+        app.buttons["Backup & Export"].tap()
+        XCTAssertTrue(app.staticTexts["Transactions: 1"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Schedules: 0"].exists)
+        XCTAssertTrue(app.staticTexts["Category limits: 0"].exists)
+
+        app.buttons["Export CSV"].tap()
+        let preview = app.staticTexts["exportPreviewText"]
+        XCTAssertTrue(preview.waitForExistence(timeout: 5))
+        XCTAssertTrue(preview.label.contains("Export test expense"))
+        XCTAssertTrue(preview.label.contains("\"12.34\",\"-12.34\""))
+        app.buttons["cancelExportPreview"].tap()
+        assertExportScreenIsInteractive(app)
+        XCTAssertTrue(app.staticTexts["Transactions: 1"].exists)
+
+        app.buttons["Export JSON Backup"].tap()
+        XCTAssertTrue(preview.waitForExistence(timeout: 5))
+        let data = try XCTUnwrap(preview.label.data(using: .utf8))
+        let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(json["format"] as? String, "ExpenseTracker")
+        let ledger = try XCTUnwrap(json["ledger"] as? [String: Any])
+        XCTAssertEqual((ledger["transactions"] as? [[String: Any]])?.count, 1)
+        app.buttons["cancelExportPreview"].tap()
+        assertExportScreenIsInteractive(app)
+        XCTAssertTrue(app.staticTexts["Transactions: 1"].exists)
+        XCTAssertFalse(app.alerts["Could Not Export"].exists)
+    }
+
+    func testCSVExportCanPresentSystemFilesPicker() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--uitesting"]
+        app.launch()
+        // Teardown is cleanup, not an assertion that system cancellation works.
+        defer { app.terminate() }
+        app.buttons["Backup & Export"].tap()
+        app.buttons["Export CSV"].tap()
+        let save = app.buttons["saveExportToFiles"]
+        XCTAssertTrue(save.waitForExistence(timeout: 5))
+        save.tap()
+        XCTAssertTrue(app.otherElements["Browse View (Picker)"].waitForExistence(timeout: 15))
+        // Files provider save/cancel/retrieval requires the documented manual check.
+    }
+
+    private func assertExportScreenIsInteractive(_ app: XCUIApplication) {
+        let button = app.buttons["Export CSV"]
+        let usable = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in button.isHittable }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [usable], timeout: 10), .completed)
+    }
+
     func testRecurringSchedulePostsIntoLedger() {
         continueAfterFailure = false
         let app = XCUIApplication()

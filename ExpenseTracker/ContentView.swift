@@ -15,6 +15,8 @@ struct ContentView: View {
                         Text("Overview").font(.title2.bold())
                         Text(Date(), style: .date).foregroundStyle(.secondary)
                         Text("Stored on this device · USD").font(.caption).foregroundStyle(.secondary)
+                        NavigationLink { BackupExportView(model: viewModel) } label: { Label("Backup & Export", systemImage: "square.and.arrow.up") }
+                            .font(.subheadline)
                     }.padding(.horizontal)
                     VStack(alignment: .leading, spacing: 12) {
                         Text("This Month").font(.headline)

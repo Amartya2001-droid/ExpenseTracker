@@ -74,6 +74,15 @@ final class TransactionListViewModel: ObservableObject {
         storageError = nil
     }
 
+    /// Capture a validated, full ledger without posting, writing, or changing checkpoints.
+    func exportSnapshot() throws -> LedgerSnapshot {
+        guard !loadFailed else { throw LedgerError.unreadableLedger }
+        guard Set(transactions.map(\.id)).count == transactions.count else { throw LedgerError.invalidData }
+        for transaction in transactions { try validate(transaction) }
+        for rule in recurringExpenses { try validateRecurring(rule) }
+        return LedgerSnapshot(transactions: transactions, recurringExpenses: recurringExpenses, postedOccurrences: postedOccurrences)
+    }
+
     func save(_ transaction: Transaction) throws {
         try validate(transaction)
         var updated = transactions
@@ -273,6 +282,12 @@ final class BudgetStore: ObservableObject {
             try JSONEncoder().encode(updated).write(to: url, options: [.atomic, .completeFileProtection])
         }
         budgets = updated
+    }
+
+    func exportBudgets() throws -> [CategoryBudget] {
+        guard !loadFailed else { throw BudgetError.unreadable }
+        for budget in budgets { try Self.validate(budget) }
+        return budgets.sorted { $0.month == $1.month ? $0.category < $1.category : $0.month < $1.month }
     }
 
     func setLimit(month: String, category: String, amount: String, locale: Locale = .current) throws {
