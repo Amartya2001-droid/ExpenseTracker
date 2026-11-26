@@ -1,6 +1,19 @@
 import XCTest
 
 final class ExpenseTrackerUITests: XCTestCase {
+    func testRestoreRequiresReviewAndCancellationPreservesCounts() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--uitesting"]
+        app.launch()
+        app.buttons["Backup & Export"].tap()
+        XCTAssertTrue(app.staticTexts["Transactions: 0"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Import JSON Backup"].waitForExistence(timeout: 5),
+                      "A backup must have an explicit import entry point before a restore can be reviewed")
+        XCTAssertTrue(app.buttons["Paste Backup JSON"].exists)
+        XCTAssertTrue(app.staticTexts["Transactions: 0"].exists, "Opening restore must not replace the ledger")
+    }
+
     func testExportPreviewCancellationPreservesLedger() throws {
         continueAfterFailure = false
         let app = XCUIApplication()
