@@ -8,10 +8,17 @@ final class TransactionListViewModel: ObservableObject {
     @Published private(set) var recurringExpenses: [RecurringExpense] = []
     private var postedOccurrences: Set<String> = []
     private let storageURL: URL?
+    let unifiedURL: URL?
     private var loadFailed = false
 
-    init(fetchOnInit: Bool = true, storageURL: URL? = nil) {
+    init(fetchOnInit: Bool = true, storageURL: URL? = nil, unifiedURL: URL? = nil) {
         self.storageURL = storageURL ?? (fetchOnInit && !ProcessInfo.processInfo.arguments.contains("--uitesting") ? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?.appendingPathComponent("transactions.json") : nil)
+        self.unifiedURL = unifiedURL ?? (fetchOnInit && storageURL == nil && !ProcessInfo.processInfo.arguments.contains("--uitesting") ? AtomicAppState.defaultURL : nil)
+        if let url = self.unifiedURL, FileManager.default.fileExists(atPath: url.path) {
+            do { adoptRestored(try AtomicAppState.read(url).ledger) }
+            catch { loadFailed = true; storageError = "The restored app snapshot could not be read. It is preserved; changes are blocked." }
+            return
+        }
         guard let url = self.storageURL, FileManager.default.fileExists(atPath: url.path) else { return }
         do {
             let data = try Data(contentsOf: url)
@@ -25,8 +32,8 @@ final class TransactionListViewModel: ObservableObject {
             guard snapshot.version == 1,
                   Set(snapshot.transactions.map(\.id)).count == snapshot.transactions.count,
                   Set(snapshot.recurringExpenses.map(\.id)).count == snapshot.recurringExpenses.count else { throw LedgerError.invalidData }
-            for transaction in snapshot.transactions { try validate(transaction) }
-            for rule in snapshot.recurringExpenses { try validateRecurring(rule) }
+            for transaction in snapshot.transactions { try Self.validateTransaction(transaction) }
+            for rule in snapshot.recurringExpenses { try Self.validateRecurring(rule) }
             for key in snapshot.postedOccurrences {
                 let parts = key.split(separator: "|", omittingEmptySubsequences: false)
                 guard parts.count == 2, UUID(uuidString: String(parts[0])) != nil,
@@ -51,7 +58,7 @@ final class TransactionListViewModel: ObservableObject {
         }
     }
 
-    private func validate(_ transaction: Transaction) throws {
+    static func validateTransaction(_ transaction: Transaction) throws {
         guard (transaction.recurringID == nil || UUID(uuidString: transaction.recurringID ?? "") != nil),
               transaction.id > 0, transaction.id < Int.max,
               !transaction.merchant.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -63,9 +70,13 @@ final class TransactionListViewModel: ObservableObject {
 
     private func persist(_ updated: [Transaction], rules: [RecurringExpense]? = nil, posted: Set<String>? = nil) throws {
         guard !loadFailed else { throw LedgerError.unreadableLedger }
-        if let url = storageURL {
+        let snapshot = LedgerSnapshot(transactions: updated, recurringExpenses: rules ?? recurringExpenses, postedOccurrences: posted ?? postedOccurrences)
+        if let url = unifiedURL, FileManager.default.fileExists(atPath: url.path) {
+            let current = try AtomicAppState.read(url)
+            guard current.ledger == (try exportSnapshot()) else { throw RestoreError.stale }
+            try AtomicAppState.write(AppSnapshot(ledger: snapshot, budgets: current.budgets), to: url)
+        } else if let url = storageURL {
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            let snapshot = LedgerSnapshot(transactions: updated, recurringExpenses: rules ?? recurringExpenses, postedOccurrences: posted ?? postedOccurrences)
             try JSONEncoder().encode(snapshot).write(to: url, options: [.atomic, .completeFileProtection])
         }
         transactions = updated
@@ -74,17 +85,42 @@ final class TransactionListViewModel: ObservableObject {
         storageError = nil
     }
 
+    func adoptRestored(_ snapshot: LedgerSnapshot) {
+        transactions = snapshot.transactions
+        recurringExpenses = snapshot.recurringExpenses
+        postedOccurrences = snapshot.postedOccurrences
+        loadFailed = false
+        storageError = nil
+    }
+
+    func storageRevision() throws -> Data? {
+        if let url = unifiedURL, FileManager.default.fileExists(atPath: url.path) {
+            let data = try Data(contentsOf: url)
+            guard (try AtomicAppState.read(url).ledger) == (try exportSnapshot()) else { throw RestoreError.stale }
+            return data
+        }
+        guard let url = storageURL, FileManager.default.fileExists(atPath: url.path) else { return nil }
+        let data = try Data(contentsOf: url)
+        let decoder = JSONDecoder()
+        let snapshot: LedgerSnapshot
+        if let legacy = try? decoder.decode([Transaction].self, from: data) {
+            snapshot = LedgerSnapshot(transactions: legacy, recurringExpenses: [], postedOccurrences: [])
+        } else { snapshot = try decoder.decode(LedgerSnapshot.self, from: data) }
+        guard snapshot == (try exportSnapshot()) else { throw RestoreError.stale }
+        return data
+    }
+
     /// Capture a validated, full ledger without posting, writing, or changing checkpoints.
     func exportSnapshot() throws -> LedgerSnapshot {
         guard !loadFailed else { throw LedgerError.unreadableLedger }
         guard Set(transactions.map(\.id)).count == transactions.count else { throw LedgerError.invalidData }
-        for transaction in transactions { try validate(transaction) }
-        for rule in recurringExpenses { try validateRecurring(rule) }
+        for transaction in transactions { try Self.validateTransaction(transaction) }
+        for rule in recurringExpenses { try Self.validateRecurring(rule) }
         return LedgerSnapshot(transactions: transactions, recurringExpenses: recurringExpenses, postedOccurrences: postedOccurrences)
     }
 
     func save(_ transaction: Transaction) throws {
-        try validate(transaction)
+        try Self.validateTransaction(transaction)
         var updated = transactions
         if let index = updated.firstIndex(where: { $0.id == transaction.id }) { updated[index] = transaction }
         else { updated.append(transaction) }
@@ -99,7 +135,7 @@ final class TransactionListViewModel: ObservableObject {
         try persist(Transaction.all)
     }
 
-    private func validateRecurring(_ rule: RecurringExpense) throws {
+    static func validateRecurring(_ rule: RecurringExpense) throws {
         guard UUID(uuidString: rule.id) != nil, !rule.merchant.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !rule.category.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               rule.amountCents > 0, rule.amountCents <= 99_999_999_999,
@@ -109,7 +145,7 @@ final class TransactionListViewModel: ObservableObject {
     }
 
     func saveRecurring(_ rule: RecurringExpense, today: Date = Date()) throws {
-        try validateRecurring(rule)
+        try Self.validateRecurring(rule)
         var updated = recurringExpenses
         if let index = updated.firstIndex(where: { $0.id == rule.id }) {
             guard let start = rule.startDate.validTransactionDate,
@@ -159,7 +195,7 @@ final class TransactionListViewModel: ObservableObject {
                         merchant: rule.merchant, amount: Double(rule.amountCents) / 100, type: "debit", categoryId: 0,
                         category: rule.category, isPending: false, isTransfer: false, isExpense: true,
                         isCashPurchase: rule.account.lowercased() == "cash", recurringID: rule.id)
-                    try validate(transaction)
+                    try Self.validateTransaction(transaction)
                     updated.append(transaction)
                     posted.insert(key)
                     count += 1
@@ -233,6 +269,7 @@ final class BudgetStore: ObservableObject {
     @Published private(set) var budgets: [CategoryBudget] = []
     @Published private(set) var storageError: String?
     private let storageURL: URL?
+    let unifiedURL: URL?
     private var loadFailed = false
     static let categories = ["Food & Dining", "Shopping", "Transport", "Housing", "Utilities", "Health", "Entertainment", "Other"]
     static var calendar: Calendar { Calendar(identifier: .gregorian) }
@@ -242,14 +279,20 @@ final class BudgetStore: ObservableObject {
         return String(format: "%04d-%02d", parts.year ?? 0, parts.month ?? 0)
     }
 
-    init(inMemory: Bool = false, storageURL: URL? = nil) {
+    init(inMemory: Bool = false, storageURL: URL? = nil, unifiedURL: URL? = nil) {
         self.storageURL = storageURL ?? (inMemory || ProcessInfo.processInfo.arguments.contains("--uitesting") ? nil : FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?.appendingPathComponent("budgets.json"))
+        self.unifiedURL = unifiedURL ?? (!inMemory && storageURL == nil && !ProcessInfo.processInfo.arguments.contains("--uitesting") ? AtomicAppState.defaultURL : nil)
+        if let url = self.unifiedURL, FileManager.default.fileExists(atPath: url.path) {
+            do { adoptRestored(try AtomicAppState.read(url).budgets) }
+            catch { loadFailed = true; storageError = "The restored app snapshot could not be read. It is preserved; changes are blocked." }
+            return
+        }
         guard let url = self.storageURL, FileManager.default.fileExists(atPath: url.path) else { return }
         do {
             let saved = try JSONDecoder().decode([CategoryBudget].self, from: Data(contentsOf: url))
             var seen = Set<String>()
             for budget in saved {
-                try Self.validate(budget)
+                try Self.validateBudget(budget)
                 guard seen.insert(budget.month + ":" + budget.category).inserted else { throw BudgetError.invalid }
             }
             budgets = saved
@@ -269,7 +312,7 @@ final class BudgetStore: ObservableObject {
         }
     }
 
-    private static func validate(_ budget: CategoryBudget) throws {
+    static func validateBudget(_ budget: CategoryBudget) throws {
         guard budget.month.count == 7, budget.month.range(of: #"^(?!0000)[0-9]{4}-(0[1-9]|1[0-2])$"#, options: .regularExpression) != nil,
               !budget.category.isEmpty, budget.category == budget.category.trimmingCharacters(in: .whitespacesAndNewlines),
               budget.limitCents > 0, budget.limitCents <= 99_999_999_999 else { throw BudgetError.invalid }
@@ -277,23 +320,45 @@ final class BudgetStore: ObservableObject {
 
     private func persist(_ updated: [CategoryBudget]) throws {
         guard !loadFailed else { throw BudgetError.unreadable }
-        if let url = storageURL {
+        if let url = unifiedURL, FileManager.default.fileExists(atPath: url.path) {
+            let current = try AtomicAppState.read(url)
+            guard current.budgets == budgets else { throw RestoreError.stale }
+            try AtomicAppState.write(AppSnapshot(ledger: current.ledger, budgets: updated), to: url)
+        } else if let url = storageURL {
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try JSONEncoder().encode(updated).write(to: url, options: [.atomic, .completeFileProtection])
         }
         budgets = updated
     }
 
+    func adoptRestored(_ restored: [CategoryBudget]) {
+        budgets = restored
+        loadFailed = false
+        storageError = nil
+    }
+
+    func storageRevision() throws -> Data? {
+        if let url = unifiedURL, FileManager.default.fileExists(atPath: url.path) {
+            let data = try Data(contentsOf: url)
+            guard try AtomicAppState.read(url).budgets == budgets else { throw RestoreError.stale }
+            return data
+        }
+        guard let url = storageURL, FileManager.default.fileExists(atPath: url.path) else { return nil }
+        let data = try Data(contentsOf: url)
+        guard try JSONDecoder().decode([CategoryBudget].self, from: data) == budgets else { throw RestoreError.stale }
+        return data
+    }
+
     func exportBudgets() throws -> [CategoryBudget] {
         guard !loadFailed else { throw BudgetError.unreadable }
-        for budget in budgets { try Self.validate(budget) }
+        for budget in budgets { try Self.validateBudget(budget) }
         return budgets.sorted { $0.month == $1.month ? $0.category < $1.category : $0.month < $1.month }
     }
 
     func setLimit(month: String, category: String, amount: String, locale: Locale = .current) throws {
         let parsed = try Transaction.parseAmount(amount, locale: locale)
         let budget = CategoryBudget(month: month, category: category.trimmingCharacters(in: .whitespacesAndNewlines), limitCents: Int64((parsed * 100).rounded()))
-        try Self.validate(budget)
+        try Self.validateBudget(budget)
         var updated = budgets.filter { $0.month != month || $0.category != budget.category }
         updated.append(budget)
         try persist(updated)

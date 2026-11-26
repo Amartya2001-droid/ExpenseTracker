@@ -1,6 +1,84 @@
 import XCTest
 
 final class ExpenseTrackerUITests: XCTestCase {
+    func testRestoreRequiresReviewAndCancellationPreservesCounts() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--uitesting"]
+        app.launch()
+        app.buttons["Add Transaction"].firstMatch.tap()
+        let merchant = app.textFields["Merchant or description"]
+        XCTAssertTrue(merchant.waitForExistence(timeout: 5))
+        merchant.tap(); merchant.typeText("Keep me")
+        let amount = app.textFields["Amount (USD)"]
+        amount.tap(); amount.typeText("12.34")
+        app.buttons["Save"].tap()
+        app.buttons["Backup & Export"].tap()
+        XCTAssertTrue(app.staticTexts["Transactions: 1"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Import JSON Backup"].waitForExistence(timeout: 5))
+        try enterBackupJSON(app)
+        XCTAssertTrue(app.staticTexts["Transactions: 1 → 2"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Schedules: 0 → 1"].exists)
+        XCTAssertTrue(app.staticTexts["Category limits: 0 → 1"].exists)
+        let added = app.staticTexts["restoreChange-transaction-77"]
+        if !added.exists { app.swipeUp() }
+        XCTAssertTrue(added.waitForExistence(timeout: 5))
+        XCTAssertTrue(added.label.contains("Restored groceries"))
+        added.tap()
+        let details = app.staticTexts["restoreAfter-transaction-77"]
+        XCTAssertTrue(details.waitForExistence(timeout: 5))
+        let data = try XCTUnwrap(details.label.data(using: .utf8))
+        let row = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(row["merchant"] as? String, "Restored groceries")
+        XCTAssertEqual(row["amount"] as? Double, 23.45)
+        app.buttons["cancelRestorePreview"].tap()
+        XCTAssertTrue(app.staticTexts["Current transactions: 1"].waitForExistence(timeout: 5))
+        app.buttons["closeBackupJSONInput"].tap()
+        assertExportScreenIsInteractive(app)
+        XCTAssertTrue(app.staticTexts["Transactions: 1"].exists)
+    }
+
+    func testRestoreRequiresSeparateConfirmationBeforeReplacingData() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--uitesting"]
+        app.launch()
+        app.buttons["Backup & Export"].tap()
+        try enterBackupJSON(app)
+        XCTAssertTrue(app.staticTexts["Transactions: 0 → 2"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Current transactions: 0"].exists)
+        app.buttons["reviewRestoreReplacement"].tap()
+        XCTAssertTrue(app.buttons["Replace Ledger and Budgets"].waitForExistence(timeout: 5))
+        app.buttons["Cancel"].tap()
+        XCTAssertTrue(app.staticTexts["Current transactions: 0"].exists)
+        app.buttons["reviewRestoreReplacement"].tap()
+        app.buttons["Replace Ledger and Budgets"].tap()
+        XCTAssertTrue(app.staticTexts["Current transactions: 2"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Current schedules: 1"].exists)
+        XCTAssertTrue(app.staticTexts["Current category limits: 1"].exists)
+        app.buttons["closeBackupJSONInput"].tap()
+        XCTAssertTrue(app.staticTexts["Transactions: 2"].waitForExistence(timeout: 5))
+    }
+
+    private func enterBackupJSON(_ app: XCUIApplication) throws {
+        app.buttons["Paste Backup JSON"].tap()
+        let input = app.textViews["backupJSONInput"]
+        XCTAssertTrue(input.waitForExistence(timeout: 5))
+        func transaction(_ id: Int, _ merchant: String, _ amount: Double, _ expense: Bool) -> [String: Any] {
+            ["id": id, "date": "11/26/2026", "institution": "Local", "account": "Cash", "merchant": merchant,
+             "amount": amount, "type": expense ? "debit" : "credit", "categoryId": 5, "category": "Food & Dining",
+             "isPending": false, "isTransfer": false, "isExpense": expense, "isCashPurchase": true]
+        }
+        let fixture: [String: Any] = ["format": "ExpenseTracker", "version": 1, "currency": "USD", "exportedAt": "2026-11-01T00:00:00Z",
+            "ledger": ["version": 1, "transactions": [transaction(77, "Restored groceries", 23.45, true), transaction(78, "Refund", 50, false)],
+                       "recurringExpenses": [["id": "11111111-1111-4111-8111-111111111111", "merchant": "Future rent", "category": "Housing", "account": "Cash", "amountCents": 50000,
+                                              "startDate": "01/01/2099", "frequency": "monthly", "nextIndex": 0]], "postedOccurrences": []],
+            "budgets": [["month": "2026-11", "category": "Food & Dining", "limitCents": 10000]]]
+        let data = try JSONSerialization.data(withJSONObject: fixture, options: [.sortedKeys])
+        input.tap(); input.typeText(String(decoding: data, as: UTF8.self))
+        app.buttons["validateBackupJSON"].tap()
+    }
+
     func testExportPreviewCancellationPreservesLedger() throws {
         continueAfterFailure = false
         let app = XCUIApplication()

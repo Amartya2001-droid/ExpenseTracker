@@ -52,7 +52,7 @@ struct RecurringExpense: Identifiable, Codable, Equatable {
 }
 
 /// Schedules, posting checkpoints, deletion tombstones and entries commit in one atomic file.
-struct LedgerSnapshot: Codable {
+struct LedgerSnapshot: Codable, Equatable {
     var version = 1
     var transactions: [Transaction]
     var recurringExpenses: [RecurringExpense]
