@@ -25,6 +25,8 @@
 		A50000000000000000000002 /* RecurringExpenseView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000004 /* RecurringExpenseView.swift */; };
 		A60000000000000000000001 /* LedgerExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A60000000000000000000003 /* LedgerExport.swift */; };
 		A60000000000000000000002 /* BackupExportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A60000000000000000000004 /* BackupExportView.swift */; };
+		B20000000000000000000001 /* LedgerRestore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000003 /* LedgerRestore.swift */; };
+		B20000000000000000000002 /* RestoreView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000004 /* RestoreView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -66,6 +68,8 @@
 		A50000000000000000000004 /* RecurringExpenseView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecurringExpenseView.swift; sourceTree = "<group>"; };
 		A60000000000000000000003 /* LedgerExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LedgerExport.swift; sourceTree = "<group>"; };
 		A60000000000000000000004 /* BackupExportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupExportView.swift; sourceTree = "<group>"; };
+		B20000000000000000000003 /* LedgerRestore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LedgerRestore.swift; sourceTree = "<group>"; };
+		B20000000000000000000004 /* RestoreView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RestoreView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -118,6 +122,8 @@
 			children = (
 				AE988B0C2C23062100DF7381 /* ExpenseTrackerApp.swift */,
 				AE988B0E2C23062100DF7381 /* ContentView.swift */,
+				B20000000000000000000004 /* RestoreView.swift */,
+				B20000000000000000000003 /* LedgerRestore.swift */,
 				A60000000000000000000004 /* BackupExportView.swift */,
 				A60000000000000000000003 /* LedgerExport.swift */,
 				A50000000000000000000004 /* RecurringExpenseView.swift */,
@@ -291,6 +297,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				AE988B0F2C23062100DF7381 /* ContentView.swift in Sources */,
+				B20000000000000000000002 /* RestoreView.swift in Sources */,
+				B20000000000000000000001 /* LedgerRestore.swift in Sources */,
 				A60000000000000000000002 /* BackupExportView.swift in Sources */,
 				A60000000000000000000001 /* LedgerExport.swift in Sources */,
 				A50000000000000000000002 /* RecurringExpenseView.swift in Sources */,

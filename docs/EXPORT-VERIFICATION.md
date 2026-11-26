@@ -27,6 +27,10 @@ On a compatible simulator and a physical device, record the tested commit, devic
 3. Open Save to Files. Cancel from the actual visible system controls, both from Browse and inside a provider folder. Verify return to the preview without an export error. Do not rely on a hidden AX element or a coordinate over the More menu.
 4. Save each format to On My iPhone, reopen it in Files, and verify it is nonempty and has the appropriate extension and contents. Check JSON format/version, ledger records, schedules, posting history and budgets. Check CSV date/money columns, Unicode, commas/quotes/newlines, and formula-like text handling in the intended spreadsheet application.
 5. Repeat a save of each format in the same app session. If a cloud provider is configured by the tester, repeat saving/retrieval there; the app itself requires no cloud credentials.
-6. Record actual pass/fail results and defects. No results are prefilled here. Restore/import is not shipped in this feature; these checks do not authorize deleting original app data.
+6. Record actual pass/fail results and defects. No results are prefilled here. The restore feature requires its own validation/preview/confirmation checks; these export checks alone never authorize deleting original app data.
 
 Signing, release archives, App Store/TestFlight distribution and the decision to ship remain Amartya's responsibility.
+
+## Restore manual checks — pending Apple-host verification
+
+Use both Import JSON Backup (Files) and Paste Backup JSON on the tested restore commit. Compare every change summary and expanded before/after record with known source data. Cancel the picker, input, preview and final confirmation separately and verify counts and saved data remain unchanged. Confirm a known replacement, relaunch, and verify transactions, schedules/checkpoints, budgets and deleted-occurrence protection. Check subsequent ledger/budget edits preserve the other data set. Test provider errors, oversized/invalid backups, changed data during review, lock/unlock and failed storage writes. No physical-device/provider or crash/power-loss results are prefilled here.

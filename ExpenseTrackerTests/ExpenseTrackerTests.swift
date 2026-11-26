@@ -537,3 +537,173 @@ final class LedgerExportTests: XCTestCase {
         XCTAssertThrowsError(try LedgerExporter.csv(model: model))
     }
 }
+
+final class RestoreTests: XCTestCase {
+    private func entry(_ id: Int = 77, amount: Double = 23.45, merchant: String = "Restored groceries") -> Transaction {
+        Transaction(id: id, date: "11/26/2026", institution: "Local", account: "Cash", merchant: merchant, amount: amount,
+            type: "debit", categoryId: 5, category: "Food & Dining", isPending: false, isTransfer: false, isExpense: true, isCashPurchase: true)
+    }
+    private func backup() throws -> Data {
+        let model = TransactionListViewModel(fetchOnInit: false)
+        try model.save(entry())
+        try model.save(entry(78, amount: 50, merchant: "Second restored entry"))
+        try model.saveRecurring(RecurringExpense(merchant: "Future rent", category: "Housing", account: "Cash", amountCents: 50000, startDate: "01/01/2099", frequency: .monthly))
+        let budgets = BudgetStore(inMemory: true)
+        try budgets.setLimit(month: "2026-11", category: "Food & Dining", amount: "100", locale: Locale(identifier: "en_US"))
+        return try LedgerExporter.json(model: model, budgets: budgets)
+    }
+    private func altered(_ change: (inout [String: Any]) -> Void) throws -> Data {
+        var object = try XCTUnwrap(try JSONSerialization.jsonObject(with: backup()) as? [String: Any])
+        change(&object)
+        return try JSONSerialization.data(withJSONObject: object)
+    }
+
+    func testCurrentSchemaRejectsUnsupportedMissingAndUnknownFields() throws {
+        XCTAssertNoThrow(try RestoreValidation.decode(backup()))
+        for data in [try altered { $0["version"] = 2 }, try altered { $0["currency"] = "EUR" },
+                     try altered { $0["format"] = "Other" }, try altered { $0.removeValue(forKey: "ledger") },
+                     try altered { $0["unexpected"] = true }, Data("not json".utf8)] {
+            XCTAssertThrowsError(try RestoreValidation.decode(data))
+        }
+    }
+
+    func testValidationRejectsDuplicateInvalidRecordsAndInconsistentHistory() throws {
+        let invalid: [(inout [String: Any]) -> Void] = [
+            { root in var ledger = root["ledger"] as! [String: Any]; var rows = ledger["transactions"] as! [[String: Any]]; rows[1]["id"] = rows[0]["id"]; ledger["transactions"] = rows; root["ledger"] = ledger },
+            { root in var ledger = root["ledger"] as! [String: Any]; var rows = ledger["transactions"] as! [[String: Any]]; rows[0]["amount"] = -1; ledger["transactions"] = rows; root["ledger"] = ledger },
+            { root in var ledger = root["ledger"] as! [String: Any]; var rows = ledger["transactions"] as! [[String: Any]]; rows[0]["date"] = "02/29/2025"; ledger["transactions"] = rows; root["ledger"] = ledger },
+            { root in var ledger = root["ledger"] as! [String: Any]; var rules = ledger["recurringExpenses"] as! [[String: Any]]; rules[0]["nextIndex"] = 1; ledger["recurringExpenses"] = rules; root["ledger"] = ledger },
+            { root in let rows = root["budgets"] as! [Any]; root["budgets"] = rows + rows },
+            { root in var ledger = root["ledger"] as! [String: Any]; ledger["postedOccurrences"] = ["bad history"]; root["ledger"] = ledger }
+        ]
+        for mutation in invalid { XCTAssertThrowsError(try RestoreValidation.decode(altered(mutation))) }
+    }
+
+    func testRealFileReadAndSizeLimits() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let data = try backup(); try data.write(to: url)
+        XCTAssertEqual(try RestoreValidation.readFile(url), data)
+        XCTAssertEqual(try RestoreValidation.decode(RestoreValidation.readFile(url)).ledger.transactions.count, 2)
+        try Data(repeating: 32, count: RestoreValidation.maxBytes + 1).write(to: url)
+        XCTAssertThrowsError(try RestoreValidation.readFile(url))
+        XCTAssertThrowsError(try RestoreValidation.decode(Data(repeating: 32, count: RestoreValidation.maxBytes + 1)))
+    }
+
+    func testPreviewShowsExactChangesAndNeverWritesWithoutConfirmation() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let ledgerURL = root.appendingPathComponent("transactions.json"), budgetsURL = root.appendingPathComponent("budgets.json"), appURL = root.appendingPathComponent("app.json")
+        let model = TransactionListViewModel(fetchOnInit: false, storageURL: ledgerURL, unifiedURL: appURL)
+        let budgets = BudgetStore(inMemory: true, storageURL: budgetsURL, unifiedURL: appURL)
+        try model.save(entry(1, merchant: "Keep me"))
+        try budgets.setLimit(month: "2026-11", category: "Food & Dining", amount: "50", locale: Locale(identifier: "en_US"))
+        let oldLedger = try Data(contentsOf: ledgerURL), oldBudgets = try Data(contentsOf: budgetsURL)
+        let draft = try LedgerRestorer.prepare(backup(), model: model, budgets: budgets)
+        XCTAssertEqual(draft.before.transactions.count, 1)
+        XCTAssertEqual(draft.backup.ledger.transactions.count, 2)
+        XCTAssertEqual(Set(draft.changes.map(\.id)), Set(["transaction-1", "transaction-77", "transaction-78", "schedule-" + draft.backup.ledger.recurringExpenses[0].id, "budget-2026-11:Food & Dining"]))
+        XCTAssertTrue(try XCTUnwrap(draft.changes.first { $0.id == "transaction-1" }?.before).contains("Keep me"))
+        XCTAssertTrue(try XCTUnwrap(draft.changes.first { $0.id == "transaction-77" }?.after).contains("Restored groceries"))
+        let budgetChange = try XCTUnwrap(draft.changes.first { $0.id.hasPrefix("budget-") })
+        XCTAssertTrue(budgetChange.title.hasPrefix("Change"))
+        XCTAssertTrue(try XCTUnwrap(budgetChange.before).contains("5000"))
+        XCTAssertTrue(try XCTUnwrap(budgetChange.after).contains("10000"))
+        XCTAssertThrowsError(try LedgerRestorer.commit(draft, confirmed: false, model: model, budgets: budgets)) { error in
+            XCTAssertEqual(error.localizedDescription, RestoreError.confirmationRequired.localizedDescription)
+        }
+        XCTAssertEqual(try Data(contentsOf: ledgerURL), oldLedger)
+        XCTAssertEqual(try Data(contentsOf: budgetsURL), oldBudgets)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: appURL.path))
+        XCTAssertEqual(model.transactions.map(\.id), [1])
+    }
+
+    func testConfirmedRestoreIsAtomicReloadableAndSubsequentWritesPreserveOtherData() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let ledgerURL = root.appendingPathComponent("transactions.json"), budgetsURL = root.appendingPathComponent("budgets.json"), appURL = root.appendingPathComponent("app.json")
+        let model = TransactionListViewModel(fetchOnInit: false, storageURL: ledgerURL, unifiedURL: appURL)
+        let budgets = BudgetStore(inMemory: true, storageURL: budgetsURL, unifiedURL: appURL)
+        try model.save(entry(1, merchant: "Old"))
+        try budgets.setLimit(month: "2026-11", category: "Food & Dining", amount: "50", locale: Locale(identifier: "en_US"))
+        let staleModel = TransactionListViewModel(fetchOnInit: false, storageURL: ledgerURL, unifiedURL: appURL)
+        let staleBudgets = BudgetStore(inMemory: true, storageURL: budgetsURL, unifiedURL: appURL)
+        let oldLedger = try Data(contentsOf: ledgerURL), oldBudgets = try Data(contentsOf: budgetsURL)
+        let draft = try LedgerRestorer.prepare(backup(), model: model, budgets: budgets)
+        try LedgerRestorer.commit(draft, confirmed: true, model: model, budgets: budgets)
+        let reloaded = TransactionListViewModel(fetchOnInit: false, storageURL: ledgerURL, unifiedURL: appURL)
+        let reloadedBudgets = BudgetStore(inMemory: true, storageURL: budgetsURL, unifiedURL: appURL)
+        XCTAssertEqual(reloaded.transactions, draft.backup.ledger.transactions)
+        XCTAssertEqual(reloaded.recurringExpenses, draft.backup.ledger.recurringExpenses)
+        XCTAssertEqual(try reloadedBudgets.exportBudgets(), draft.backup.budgets)
+        try reloadedBudgets.setLimit(month: "2026-11", category: "Food & Dining", amount: "200", locale: Locale(identifier: "en_US"))
+        try reloaded.save(entry(79, merchant: "After restore"))
+        let state = try AtomicAppState.read(appURL)
+        XCTAssertEqual(state.ledger.transactions.count, 3)
+        XCTAssertEqual(state.budgets[0].limitCents, 20000)
+        XCTAssertEqual(state.ledger.recurringExpenses.count, 1)
+        XCTAssertThrowsError(try staleModel.save(entry(99)))
+        XCTAssertThrowsError(try staleBudgets.setLimit(month: "2026-11", category: "Food & Dining", amount: "1", locale: Locale(identifier: "en_US")))
+        XCTAssertEqual(try Data(contentsOf: ledgerURL), oldLedger)
+        XCTAssertEqual(try Data(contentsOf: budgetsURL), oldBudgets)
+    }
+
+    func testStalePreviewCannotOverwriteChangedData() throws {
+        let model = TransactionListViewModel(fetchOnInit: false), budgets = BudgetStore(inMemory: true)
+        try model.save(entry(1))
+        let draft = try LedgerRestorer.prepare(backup(), model: model, budgets: budgets)
+        try model.save(entry(2, merchant: "New while reviewing"))
+        XCTAssertThrowsError(try LedgerRestorer.commit(draft, confirmed: true, model: model, budgets: budgets))
+        XCTAssertEqual(Set(model.transactions.map(\.id)), [1, 2])
+        let newer = try LedgerRestorer.prepare(backup(), model: model, budgets: budgets)
+        try budgets.setLimit(month: "2026-11", category: "Other", amount: "1", locale: Locale(identifier: "en_US"))
+        XCTAssertThrowsError(try LedgerRestorer.commit(newer, confirmed: true, model: model, budgets: budgets))
+        XCTAssertEqual(budgets.budgets.count, 1)
+    }
+
+    func testFailedCommitLeavesBothLegacyFilesAndMemoryUntouched() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let ledgerURL = root.appendingPathComponent("transactions.json"), budgetsURL = root.appendingPathComponent("budgets.json"), blocked = root.appendingPathComponent("blocked")
+        let model = TransactionListViewModel(fetchOnInit: false, storageURL: ledgerURL, unifiedURL: blocked.appendingPathComponent("app.json"))
+        let budgets = BudgetStore(inMemory: true, storageURL: budgetsURL, unifiedURL: blocked.appendingPathComponent("app.json"))
+        try model.save(entry(1)); try budgets.setLimit(month: "2026-11", category: "Other", amount: "50", locale: Locale(identifier: "en_US"))
+        let oldLedger = try Data(contentsOf: ledgerURL), oldBudgets = try Data(contentsOf: budgetsURL)
+        let draft = try LedgerRestorer.prepare(backup(), model: model, budgets: budgets)
+        try Data("not a directory".utf8).write(to: blocked)
+        XCTAssertThrowsError(try LedgerRestorer.commit(draft, confirmed: true, model: model, budgets: budgets))
+        XCTAssertEqual(model.transactions.map(\.id), [1])
+        XCTAssertEqual(budgets.budgets[0].limitCents, 5000)
+        XCTAssertEqual(try Data(contentsOf: ledgerURL), oldLedger)
+        XCTAssertEqual(try Data(contentsOf: budgetsURL), oldBudgets)
+    }
+
+    func testRestoredDeletedOccurrenceHistoryDoesNotRecreateEntries() throws {
+        let incoming = TransactionListViewModel(fetchOnInit: false)
+        let rule = RecurringExpense(merchant: "Subscription", category: "Other", account: "Cash", amountCents: 1000, startDate: "01/31/2026", frequency: .monthly)
+        try incoming.saveRecurring(rule); try incoming.postDueExpenses(through: "01/31/2026".dateParsed())
+        try incoming.delete(Set(incoming.transactions.map(\.id)))
+        let data = try LedgerExporter.json(model: incoming, budgets: BudgetStore(inMemory: true))
+        let model = TransactionListViewModel(fetchOnInit: false), budgets = BudgetStore(inMemory: true)
+        let draft = try LedgerRestorer.prepare(data, model: model, budgets: budgets)
+        XCTAssertEqual(draft.changes.filter { $0.id.hasPrefix("history-") }.count, 1)
+        try LedgerRestorer.commit(draft, confirmed: true, model: model, budgets: budgets)
+        XCTAssertEqual(try model.postDueExpenses(through: "01/31/2026".dateParsed()), 0)
+        XCTAssertEqual(try model.postDueExpenses(through: "02/28/2026".dateParsed()), 1)
+    }
+
+    func testCorruptCanonicalSnapshotDoesNotFallBackToLegacyData() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let appURL = root.appendingPathComponent("app.json"), legacy = root.appendingPathComponent("transactions.json")
+        try JSONEncoder().encode([entry(1)]).write(to: legacy)
+        let bad = Data("bad canonical snapshot".utf8); try bad.write(to: appURL)
+        let model = TransactionListViewModel(fetchOnInit: false, storageURL: legacy, unifiedURL: appURL)
+        let budgets = BudgetStore(inMemory: true, unifiedURL: appURL)
+        XCTAssertNotNil(model.storageError); XCTAssertNotNil(budgets.storageError)
+        XCTAssertThrowsError(try model.save(entry()))
+        XCTAssertThrowsError(try budgets.setLimit(month: "2026-11", category: "Other", amount: "1", locale: Locale(identifier: "en_US")))
+        XCTAssertEqual(try Data(contentsOf: appURL), bad)
+    }
+}

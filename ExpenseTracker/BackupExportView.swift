@@ -16,6 +16,8 @@ struct BackupExportView: View {
     @StateObject private var budgets = BudgetStore()
     @State private var prepared: PreparedLedgerExport?
     @State private var errorMessage: String?
+    @State private var showingImporter = false
+    @State private var restoreDraft: RestoreDraft?
 
     var body: some View {
         List {
@@ -32,7 +34,12 @@ struct BackupExportView: View {
             Section("Full Backup") {
                 Button("Export JSON Backup") { prepare(json: true) }
                     .disabled(model.storageError != nil || budgets.storageError != nil)
-                Text("Includes transactions, recurring schedules and posting/deletion history, plus all category budgets. Review the preview before saving. Restore/import is not available in this app yet.").font(.caption)
+                Text("Includes transactions, recurring schedules and posting/deletion history, plus all category budgets. Review the preview before saving. Restore requires separate validation and explicit confirmation.").font(.caption)
+            }
+            Section("Restore Backup") {
+                Button("Import JSON Backup") { showingImporter = true }
+                NavigationLink("Paste Backup JSON") { RestoreJSONInputView(model: model, budgets: budgets) }
+                Text("Import validates first, then shows every change. Replacing ledger, schedules and budgets requires explicit confirmation; it never runs automatically.").font(.caption)
             }
             Section("Spreadsheet Export") {
                 Button("Export CSV") { prepare(json: false) }.disabled(model.storageError != nil)
@@ -44,6 +51,15 @@ struct BackupExportView: View {
         }
         .navigationTitle("Backup & Export")
         .sheet(item: $prepared) { LedgerExportPreview(export: $0) }
+        .sheet(item: $restoreDraft) { RestorePreviewView(draft: $0, model: model, budgets: budgets) }
+        .fileImporter(isPresented: $showingImporter, allowedContentTypes: [.json]) { result in
+            do {
+                let url = try result.get()
+                restoreDraft = try LedgerRestorer.prepare(RestoreValidation.readFile(url), model: model, budgets: budgets)
+            } catch {
+                if (error as NSError).domain != NSCocoaErrorDomain || (error as NSError).code != NSUserCancelledError { errorMessage = error.localizedDescription }
+            }
+        }
         .alert("Could Not Export", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
             Button("OK") { errorMessage = nil }
         } message: { Text(errorMessage ?? "") }
